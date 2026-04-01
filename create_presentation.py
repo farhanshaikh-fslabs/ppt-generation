@@ -184,7 +184,7 @@ def _create_content_slide(prs: Presentation, slide_data: dict, design_system: di
     title_frame = title_box.text_frame
     title_para = title_frame.paragraphs[0]
     title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(40)
+    title_para.font.size = Pt(24)
     title_para.font.bold = True
     title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
     
@@ -263,7 +263,7 @@ def _create_two_column_slide(prs: Presentation, slide_data: dict, design_system:
     title_frame = title_box.text_frame
     title_para = title_frame.paragraphs[0]
     title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(40)
+    title_para.font.size = Pt(24)
     title_para.font.bold = True
     title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
     
@@ -314,7 +314,7 @@ def _create_image_text_slide(prs: Presentation, slide_data: dict, design_system:
     title_frame = title_box.text_frame
     title_para = title_frame.paragraphs[0]
     title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(40)
+    title_para.font.size = Pt(24)
     title_para.font.bold = True
     title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
     
@@ -358,7 +358,7 @@ def _create_data_chart_slide(prs: Presentation, slide_data: dict, design_system:
     title_frame = title_box.text_frame
     title_para = title_frame.paragraphs[0]
     title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(40)
+    title_para.font.size = Pt(24)
     title_para.font.bold = True
     title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
     
@@ -413,7 +413,7 @@ def _create_centered_slide(prs: Presentation, slide_data: dict, design_system: d
     
     title_para = title_frame.paragraphs[0]
     title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(48)
+    title_para.font.size = Pt(28)
     title_para.font.bold = True
     title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
     title_para.alignment = PP_ALIGN.CENTER
@@ -443,7 +443,7 @@ def _create_comparison_slide(prs: Presentation, slide_data: dict, design_system:
     title_frame = title_box.text_frame
     title_para = title_frame.paragraphs[0]
     title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(40)
+    title_para.font.size = Pt(24)
     title_para.font.bold = True
     title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
     
