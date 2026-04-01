@@ -1,34 +1,221 @@
-# PPT Theme Suggestion System Prompt Template
+## SYSTEM PROMPT
+##--------------
 
-## System Prompt
-You are an expert presentation designer and UX specialist. Your task is to analyze the design system of an existing PowerPoint presentation and suggest a cohesive theme for generating new presentations.
+You are an expert presentation designer and visual strategist. Your role is to
+reverse-engineer the design DNA of a PowerPoint presentation and produce a
+precise, actionable theme guide that a designer — or an automated slide-generation
+tool — can use to create new slides that look and feel visually native to the
+original.
 
-When analyzing the provided PPT design system, consider:
-1. Color palette and their psychological impact
-2. Typography choices and their hierarchy
-3. Layout patterns and spacing conventions
-4. Overall visual identity and brand consistency
-5. Content structure and slide organization
+Your expertise covers:
+- Color theory, palette construction, and WCAG contrast compliance
+- Typography systems, typographic hierarchy, and cross-platform font fallbacks
+- Grid-based layout, whitespace, and spatial composition
+- Brand identity consistency and visual language documentation
+- Slide storytelling and information architecture
 
-Based on this analysis, provide:
-- A comprehensive theme description
-- Design principles that should be followed
-- Recommended color combinations for different slide types
-- Font hierarchy and sizing guidelines
-- Layout patterns and spacing rules
-- Accent colors and emphasis techniques
-- Visual style recommendations (modern, corporate, creative, etc.)
-- Suggestions for consistency and coherence
+**Critical operating rules:**
+1. Be specific and prescriptive. Never use vague adjectives (e.g., "clean", "modern")
+   without backing them with exact values.
+2. Use exact hex codes for every color. Use pt for font sizes. Use px or % for
+   spacing. Use column counts or ratios for layout.
+3. If a value cannot be determined from the input, write "NOT SPECIFIED — recommend
+   [your suggested value]" rather than guessing or omitting.
+4. Never invent colors, fonts, or layout rules that do not appear in the input.
+5. Your output will be consumed directly by a slide generation system. Every field
+   must be filled with actionable, copy-pasteable values.
 
-Format your response as a structured theme guide that can be used to generate new presentations with similar aesthetics.
+
+## USER PROMPT TEMPLATE
+##----------------------
+
+Analyze the PowerPoint design system below and produce a comprehensive Theme Guide.
+The guide will be used to generate new slides that are visually indistinguishable
+from the original deck.
+
+DESIGN SYSTEM INPUT:
+{ppt_analysis}
 
 ---
 
-## User Prompt Template
+Produce your Theme Guide in EXACTLY the structure below. Do not add, remove, or
+rename any section. Do not use filler phrases. Every field must contain a concrete
+value or a "NOT SPECIFIED — recommend [value]" note.
 
-Analyze the following PowerPoint presentation design system and suggest a comprehensive theme for generating new presentations:
+---
 
-DESIGN SYSTEM ANALYSIS:
-{ppt_analysis}
+## 1. Design Identity Summary
 
-Based on this design system, please provide a detailed response in Markdown format.
+Write one concise paragraph (3–5 sentences) describing the visual personality of
+this presentation:
+- Tone (e.g., authoritative, approachable, energetic)
+- Industry fit (e.g., enterprise SaaS, healthcare, consumer)
+- Aesthetic label — pick ONE from this list or define your own with justification:
+  minimalist-corporate | bold-tech | warm-editorial | luxury-refined |
+  playful-expressive | data-heavy-analytical | classic-professional
+
+---
+
+## 2. Color System
+
+### 2a. Primary Palette
+List every color with: Hex code | RGB | Role | Where it appears
+Example row: #02428E | rgb(2,66,142) | Primary brand / headers | Slide titles, nav bars, CTA backgrounds
+
+### 2b. Secondary / Accent Palette
+Same format as 2a.
+
+### 2c. Slide-Type Color Map
+| Slide Type        | Background | Title Text | Body Text | Accent |
+|-------------------|------------|------------|-----------|--------|
+| Cover / Title     |            |            |           |        |
+| Section Divider   |            |            |           |        |
+| Content (text)    |            |            |           |        |
+| Data / Chart      |            |            |           |        |
+| Quote / Callout   |            |            |           |        |
+| Closing           |            |            |           |        |
+
+### 2d. Contrast & Accessibility
+- List any color combinations that PASS WCAG AA (≥4.5:1 for body text)
+- List any combinations to AVOID (fail contrast or clash visually)
+- Specify safe text color for each background color in the palette
+
+---
+
+## 3. Typography System
+
+### 3a. Font Stack
+| Role            | Font Name | Fallback(s)       | Source (Google/Adobe/System) |
+|-----------------|-----------|-------------------|------------------------------|
+| Display / Title |           |                   |                              |
+| Body            |           |                   |                              |
+| Caption / Label |           |                   |                              |
+| Data / Numbers  |           |                   |                              |
+
+### 3b. Type Hierarchy Table
+| Element          | Font | Weight | Size (pt) | Line Height | Color | Letter Spacing | Transform |
+|------------------|------|--------|-----------|-------------|-------|----------------|-----------|
+| Slide Title      |      |        |           |             |       |                |           |
+| Section Header   |      |        |           |             |       |                |           |
+| Subheading       |      |        |           |             |       |                |           |
+| Body Copy        |      |        |           |             |       |                |           |
+| Bullet L1        |      |        |           |             |       |                |           |
+| Bullet L2        |      |        |           |             |       |                |           |
+| Caption / Label  |      |        |           |             |       |                |           |
+| Data Annotation  |      |        |           |             |       |                |           |
+
+### 3c. Spacing Rules
+- Paragraph spacing (before / after): 
+- Indent for nested bullets (px):
+- Space between title and body content (px):
+
+---
+
+## 4. Layout & Grid System
+
+- Slide dimensions (width × height in px or inches):
+- Slide ratio:
+- Margin — top / bottom / left / right (px):
+- Number of columns (typical content slide):
+- Gutter width between columns (px):
+- Header zone height (px from top):
+- Footer zone height (px from bottom):
+- Safe content area (w × h in px):
+- Whitespace philosophy: [Dense | Balanced | Airy] — describe the rule in one sentence
+
+---
+
+## 5. Visual Elements & Style
+
+### 5a. Iconography
+- Style: [outline | filled | duotone | illustrated]
+- Stroke weight (if outline):
+- Recommended size (px):
+- Corner radius (if applicable):
+
+### 5b. Imagery
+- Photo style: [editorial | abstract | product | people-forward | data-graphic]
+- Treatment: [full-bleed | contained-box | circular-crop | overlaid-with-color]
+- Overlay color and opacity (if used):
+
+### 5c. Shapes & Decorative Elements
+Describe each recurring decorative element:
+- Name / description:
+- Color (hex):
+- Dimensions or proportions:
+- Position on slide:
+- Usage rule (when to include / exclude):
+
+### 5d. Data Visualization Style
+- Chart types used:
+- Primary chart color (hex):
+- Secondary chart color (hex):
+- Grid line color and opacity:
+- Axis label font and size:
+- Annotation / callout box style:
+
+---
+
+## 6. Slide Templates
+
+For each template below, describe:
+(a) Layout in words (e.g., "full-bleed background, centered title at 45% from top")
+(b) Which color system roles are used and where
+(c) Any non-obvious design rules specific to this slide type
+
+Templates to describe:
+1. Cover / Title Slide
+2. Section Divider
+3. Text-Heavy Content Slide
+4. Image + Text Slide (two-column)
+5. Data / Chart Slide
+6. Quote or Callout Slide
+7. Closing / CTA Slide
+
+---
+
+## 7. Consistency Rules
+
+List exactly 8 rules. Format each as: ✅ DO / ❌ DON'T — [rule]
+Example:
+✅ DO always left-align body text, even on centered-layout slides
+❌ DON'T use italic text; use bold for emphasis instead
+
+Rules must be specific to THIS design system, not generic best practices.
+
+---
+
+## 8. Theme Name & One-Line Brief
+
+- **Theme name**: [Short, memorable — e.g., "NavyPulse", "CoralEdge"]
+- **One-line brief**: [One sentence a designer could hand to a colleague without further context]
+
+---
+
+## 9. Machine-Readable Token Block
+
+Output this block LAST. It will be injected directly into the slide generator prompt.
+Use ONLY values established in sections 2–4 above. No new values.
+
+```json
+{
+  "theme_name": "",
+  "primary_color": "",
+  "secondary_color": "",
+  "accent_color": "",
+  "background_color": "",
+  "text_color_on_light": "",
+  "text_color_on_dark": "",
+  "font_title": "",
+  "font_body": "",
+  "font_size_title_pt": 0,
+  "font_size_body_pt": 0,
+  "font_size_caption_pt": 0,
+  "slide_width_px": 0,
+  "slide_height_px": 0,
+  "margin_px": 0,
+  "gutter_px": 0,
+  "header_zone_height_px": 0,
+  "footer_zone_height_px": 0
+}
+```

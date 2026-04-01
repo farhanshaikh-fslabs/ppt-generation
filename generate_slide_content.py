@@ -185,8 +185,8 @@ def save_slide_content(
 
 
 def generate_slides(
-    seller_company_name: str = "icicilombard",
-    prospect_company_name: str = "juniper",
+    seller_company_name: str = None,
+    prospect_company_name: str = None,
     theme_file: str = None,
     prompt_file: str = "prompts/presentation_slides_generator_prompt.txt",
     output_file: str = None,

@@ -1,631 +1,794 @@
 """
 PPT Presentation Generator
 
-Converts the generated JSON slide structure into a actual PowerPoint presentation
-using the python-pptx library. Handles all slide types and design specifications
-from the JSON schema.
+Converts the generated JSON slide structure into a PowerPoint presentation
+using python-pptx.  Field names are aligned to the schema defined in
+prompts/presentation_slides_generator_prompt.txt — the code is NOT tuned to
+any single JSON output.
 """
 
 import json
-import os
+import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional
+
 from pptx import Presentation
-from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
+from pptx.enum.chart import XL_CHART_TYPE
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.util import Inches, Pt
+
+# ---------------------------------------------------------------------------
+# Logging — no print() anywhere in this module
+# ---------------------------------------------------------------------------
+logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
+log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Layout constants
+# ---------------------------------------------------------------------------
+SLIDE_WIDTH  = Inches(10)
+SLIDE_HEIGHT = Inches(7.5)
+MARGIN_L     = Inches(0.5)
+CONTENT_W    = Inches(9.0)
+FOOTER_TOP   = Inches(7.12)
+FOOTER_H     = Inches(0.25)
+FOOTER_TEXT  = "InsightSphere"
+
+HEADER_IMAGE = Path("templates") / "header.png"
+
+# Content-slide title hard cap (user requirement: <=28 pt or title overflows)
+CONTENT_TITLE_PT = 28
+
+# Chart-type mapping from JSON schema string → python-pptx enum
+CHART_TYPE_MAP = {
+    "bar":     XL_CHART_TYPE.BAR_CLUSTERED,
+    "column":  XL_CHART_TYPE.COLUMN_CLUSTERED,
+    "line":    XL_CHART_TYPE.LINE_MARKERS,
+    "pie":     XL_CHART_TYPE.PIE,
+    "donut":   XL_CHART_TYPE.DOUGHNUT,
+    "scatter": XL_CHART_TYPE.XY_SCATTER,
+}
+
+# ---------------------------------------------------------------------------
+# Fallback palette (used when design_system_reference is incomplete)
+# ---------------------------------------------------------------------------
+FB_PRIMARY = "#02428E"
+FB_ACCENT  = "#F26633"
+FB_TEXT    = "#000000"
+FB_WHITE   = "#FFFFFF"
+FB_BG      = "#FFFFFF"
 
 
-def parse_color(hex_color: str) -> RGBColor:
-    """Convert hex color code to RGBColor.
-    
-    Args:
-        hex_color: Hex color code (e.g., '#02428E')
-    
-    Returns:
-        RGBColor object
+# ---------------------------------------------------------------------------
+# DesignSystem  — maps the 10 fields from the prompt schema
+# ---------------------------------------------------------------------------
+@dataclass
+class DesignSystem:
     """
-    hex_color = hex_color.lstrip('#')
-    return RGBColor(int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16))
-
-
-def load_slide_json(json_file: str) -> dict:
-    """Load and parse the slide JSON file.
-    
-    Args:
-        json_file: Path to the JSON file
-    
-    Returns:
-        Parsed JSON dictionary
+    Maps exactly to design_system_reference in the prompt schema:
+      theme_name, primary_color, accent_color, background_color,
+      text_color_on_light, text_color_on_dark,
+      font_title, font_body, font_size_title_pt, font_size_body_pt
     """
+    theme_name:     str   = "InsightSphere"
+    primary_color:  str   = FB_PRIMARY
+    accent_color:   str   = FB_ACCENT
+    bg_color:       str   = FB_BG
+    text_on_light:  str   = FB_PRIMARY
+    text_on_dark:   str   = FB_WHITE
+    font_title:     str   = "Arial"
+    font_body:      str   = "Arial"
+    title_pt:       int   = 44
+    body_pt:        int   = 15
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DesignSystem":
+        return cls(
+            theme_name    = d.get("theme_name",           cls.theme_name),
+            primary_color = d.get("primary_color",        FB_PRIMARY),
+            accent_color  = d.get("accent_color",         FB_ACCENT),
+            bg_color      = d.get("background_color",     FB_BG),
+            text_on_light = d.get("text_color_on_light",  d.get("primary_color", FB_PRIMARY)),
+            text_on_dark  = d.get("text_color_on_dark",   FB_WHITE),
+            font_title    = d.get("font_title",           "Arial"),
+            font_body     = d.get("font_body",            "Arial"),
+            title_pt      = int(d.get("font_size_title_pt", 44)),
+            body_pt       = int(d.get("font_size_body_pt",  15)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Colour helper
+# ---------------------------------------------------------------------------
+def _rgb(hex_color: str, fallback: str = FB_TEXT) -> RGBColor:
     try:
-        with open(json_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Strip markdown code block wrapper if present
-        if content.strip().startswith('```'):
-            # Remove ```json at start
-            content = re.sub(r'^```json\n', '', content.strip())
-            # Remove ``` at end
-            content = re.sub(r'\n```$', '', content)
-        
-        slides_data = json.loads(content)
-        print(f"[OK] Loaded slide JSON from {json_file}")
-        return slides_data
-    except FileNotFoundError:
-        print(f"[ERROR] Slide JSON file not found: {json_file}")
-        raise
-    except json.JSONDecodeError as e:
-        print(f"[ERROR] Failed to parse JSON: {e}")
-        raise
+        h = hex_color.lstrip("#")
+        if len(h) != 6:
+            raise ValueError
+        return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except Exception:
+        log.warning("Bad colour %r — falling back to %r", hex_color, fallback)
+        return _rgb(fallback)
 
 
-def create_presentation(slides_data: dict, output_file: str) -> str:
-    """Create PowerPoint presentation from slide JSON structure.
-    
-    Args:
-        slides_data: Parsed slide JSON data
-        output_file: Path to save the PowerPoint file
-    
-    Returns:
-        Path to the created presentation
-    """
-    # Create presentation
-    prs = Presentation()
-    prs.slide_width = Inches(10)
-    prs.slide_height = Inches(7.5)
-    
-    # Get metadata and design system
-    metadata = slides_data.get('presentation_metadata', {})
-    design_system = slides_data.get('design_system_reference', {})
-    slides_list = slides_data.get('slides', [])
-    
-    print(f"\nCreating presentation: {metadata.get('title', 'Untitled')}")
-    print(f"Total slides: {len(slides_list)}")
-    
-    # Create each slide
-    for slide_data in slides_list:
-        slide_number = slide_data.get('slide_number', 0)
-        slide_type = slide_data.get('slide_type', 'content')
-        
-        print(f"  Creating slide {slide_number}: {slide_type}")
-        
-        if slide_type == 'title':
-            _create_title_slide(prs, slide_data, design_system)
-        elif slide_type == 'content':
-            _create_content_slide(prs, slide_data, design_system)
-        elif slide_type == 'two_column':
-            _create_two_column_slide(prs, slide_data, design_system)
-        elif slide_type == 'image_text':
-            _create_image_text_slide(prs, slide_data, design_system)
-        elif slide_type == 'data_chart':
-            _create_data_chart_slide(prs, slide_data, design_system)
-        elif slide_type == 'centered_content':
-            _create_centered_slide(prs, slide_data, design_system)
-        elif slide_type == 'comparison':
-            _create_comparison_slide(prs, slide_data, design_system)
-        elif slide_type == 'closing':
-            _create_closing_slide(prs, slide_data, design_system)
+# ---------------------------------------------------------------------------
+# Low-level shape / text helpers
+# ---------------------------------------------------------------------------
+def _blank_slide(prs: Presentation):
+    return prs.slides.add_slide(prs.slide_layouts[6])
+
+
+def _bg_solid(slide, hex_color: str) -> None:
+    f = slide.background.fill
+    f.solid()
+    f.fore_color.rgb = _rgb(hex_color, FB_BG)
+
+
+def _bg_gradient(slide, colors: List[str], angle: float = 45.0,
+                 fallback: str = FB_PRIMARY) -> None:
+    f = slide.background.fill
+    f.gradient()
+    f.gradient_angle = angle
+    f.gradient_stops[0].color.rgb = _rgb(colors[0] if colors else fallback, fallback)
+    f.gradient_stops[1].color.rgb = _rgb(
+        colors[1] if len(colors) > 1 else fallback, fallback)
+
+
+def _textbox(slide, left, top, width, height, wrap: bool = True):
+    """Return (shape, text_frame, first_paragraph)."""
+    s  = slide.shapes.add_textbox(left, top, width, height)
+    tf = s.text_frame
+    tf.word_wrap = wrap
+    return s, tf, tf.paragraphs[0]
+
+
+def _fmt(para, text: str, pt: int, bold=False, italic=False,
+         color: str = FB_TEXT, align=PP_ALIGN.LEFT,
+         font_name: str = None) -> None:
+    para.text           = text
+    para.font.size      = Pt(pt)
+    para.font.bold      = bold
+    para.font.italic    = italic
+    para.font.color.rgb = _rgb(color)
+    para.alignment      = align
+    if font_name:
+        para.font.name = font_name
+
+
+def _accent_line(slide, top, left=None, width=None,
+                 color: str = FB_ACCENT) -> None:
+    left  = left  if left  is not None else MARGIN_L
+    width = width if width is not None else CONTENT_W
+    ln = slide.shapes.add_shape(1, left, top, width, Inches(0.045))
+    ln.fill.solid()
+    ln.fill.fore_color.rgb = _rgb(color)
+    ln.line.color.rgb      = _rgb(color)
+
+
+def _colored_box(slide, text: str, left, top, width, height,
+                 bg: str, fg: str = FB_WHITE, pt: int = 14,
+                 bold: bool = True, font_name: str = None) -> None:
+    box = slide.shapes.add_shape(1, left, top, width, height)
+    box.fill.solid()
+    box.fill.fore_color.rgb = _rgb(bg)
+    box.line.color.rgb      = _rgb(bg)
+    tf = box.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    _fmt(tf.paragraphs[0], text, pt, bold=bold, color=fg,
+         align=PP_ALIGN.CENTER, font_name=font_name)
+
+
+# ---------------------------------------------------------------------------
+# Reusable composite helpers
+# ---------------------------------------------------------------------------
+def _title_box(slide, text: str, ds: DesignSystem,
+               top=None, left=None, width=None,
+               align=PP_ALIGN.LEFT, color: str = None,
+               pt: int = None) -> None:
+    top   = top   if top   is not None else Inches(0.3)
+    left  = left  if left  is not None else MARGIN_L
+    width = width if width is not None else CONTENT_W
+    color = color or ds.text_on_light
+    pt    = pt    if pt    is not None else CONTENT_TITLE_PT
+    _, _, p = _textbox(slide, left, top, width, Inches(0.75))
+    _fmt(p, text, pt, bold=True, color=color, align=align, font_name=ds.font_title)
+
+
+def _subtitle_box(slide, text: str, ds: DesignSystem,
+                  top=None, left=None, width=None,
+                  align=PP_ALIGN.LEFT, color: str = None,
+                  pt: int = None) -> None:
+    if not text:
+        return
+    top   = top   if top   is not None else Inches(1.1)
+    left  = left  if left  is not None else MARGIN_L
+    width = width if width is not None else CONTENT_W
+    color = color or ds.text_on_light
+    pt    = pt    if pt    is not None else 18
+    _, _, p = _textbox(slide, left, top, width, Inches(0.45))
+    _fmt(p, text, pt, bold=True, color=color, font_name=ds.font_body, align=align)
+
+
+def _render_bullets(slide, items: List[dict], ds: DesignSystem,
+                    left, top, width, height) -> None:
+    """Render bullet dicts per prompt schema: {level, text, emphasis, accent}."""
+    if not items:
+        return
+    _, tf, _ = _textbox(slide, left, top, width, height)
+    for i, b in enumerate(items):
+        para = tf.paragraphs[i] if i == 0 else tf.add_paragraph()
+        lvl  = max(0, int(b.get("level", 1)) - 1)
+        para.level     = lvl
+        para.text      = b.get("text", "")
+        para.font.size = Pt(ds.body_pt if lvl == 0 else ds.body_pt - 2)
+        para.font.name = ds.font_body
+        para.font.bold = (b.get("emphasis", "normal") == "bold")
+
+        accent_val = b.get("accent", "none")
+        if accent_val == "primary":
+            para.font.color.rgb = _rgb(ds.primary_color)
+        elif accent_val == "accent":
+            para.font.color.rgb = _rgb(ds.accent_color)
         else:
-            print(f"    [WARNING] Unknown slide type: {slide_type}")
-    
-    # Save presentation
-    try:
-        prs.save(output_file)
-        print(f"\n[OK] Presentation saved to {output_file}")
-        return output_file
-    except Exception as e:
-        print(f"[ERROR] Failed to save presentation: {e}")
-        raise
+            para.font.color.rgb = _rgb(ds.text_on_light)
+
+        para.space_before = Pt(5)
+        para.space_after  = Pt(5)
 
 
-def _create_title_slide(prs: Presentation, slide_data: dict, design_system: dict):
-    """Create a title/hero slide."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank layout
-    background = slide.background
-    fill = background.fill
-    
-    # Set gradient background
-    design_notes = slide_data.get('design_notes', {})
-    gradient_colors = design_notes.get('gradient_colors', [])
-    
-    if gradient_colors and len(gradient_colors) >= 2:
-        fill.gradient()
-        fill.gradient_angle = 45.0
-        fill.gradient_stops[0].color.rgb = parse_color(gradient_colors[0])
-        fill.gradient_stops[1].color.rgb = parse_color(gradient_colors[1])
+def _render_str_list(slide, items: List[str], color: str,
+                     left, top, width, height, pt: int = 14,
+                     font_name: str = None, bullet_prefix: str = "\u2022 ") -> None:
+    """Render a plain list[str] into a text box with optional bullet prefix."""
+    if not items:
+        return
+    _, tf, _ = _textbox(slide, left, top, width, height)
+    for i, text in enumerate(items):
+        para = tf.paragraphs[i] if i == 0 else tf.add_paragraph()
+        para.text           = f"{bullet_prefix}{text}" if bullet_prefix else text
+        para.font.size      = Pt(pt)
+        para.font.color.rgb = _rgb(color)
+        para.space_before   = Pt(4)
+        para.space_after    = Pt(4)
+        if font_name:
+            para.font.name = font_name
+
+
+def _footer(slide, ds: DesignSystem) -> None:
+    _, _, p = _textbox(slide, Inches(0.3), FOOTER_TOP, Inches(3), FOOTER_H, wrap=False)
+    _fmt(p, FOOTER_TEXT, 10, color=ds.primary_color, font_name=ds.font_body)
+
+
+def _add_speaker_notes(slide, sd: dict) -> None:
+    """Add prospect_relevance_note + slide_purpose as speaker notes."""
+    parts: list[str] = []
+    prn = sd.get("prospect_relevance_note", "")
+    sp  = sd.get("slide_purpose", "")
+    if sp:
+        parts.append(f"[Slide Purpose] {sp}")
+    if prn:
+        parts.append(f"[Prospect Relevance] {prn}")
+    if parts:
+        notes_slide = slide.notes_slide
+        notes_slide.notes_text_frame.text = "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Schema-aware accessors (per the prompt schema)
+# ---------------------------------------------------------------------------
+def _get_bullets(sd: dict) -> List[dict]:
+    """Prompt schema: bullets lives at sd['bullets']. Fallback to sd['content']['bullets']."""
+    return sd.get("bullets") or sd.get("content", {}).get("bullets") or []
+
+
+def _get_callout(sd: dict) -> Optional[dict]:
+    """Prompt schema: callout_box at sd['callout_box']. Fallback to design_notes."""
+    cb = sd.get("callout_box") or sd.get("design_notes", {}).get("callout_box")
+    return cb if (cb and cb.get("text")) else None
+
+
+def _accent_line_wanted(sd: dict) -> bool:
+    val = sd.get("design_notes", {}).get("accent_line", False)
+    return val is True or str(val).lower() in ("true", "yes")
+
+
+def _get_accent_line_color(sd: dict, ds: DesignSystem) -> str:
+    return sd.get("design_notes", {}).get("accent_line_color", ds.accent_color)
+
+
+def _resolve_bg(slide, dn: dict, ds: DesignSystem,
+                dark_default: str = None) -> None:
+    """Apply background from design_notes: solid hex, 'gradient', or gradient_colors."""
+    bg = dn.get("background", dark_default or ds.bg_color)
+    gc = dn.get("gradient_colors", [])
+    if gc:
+        _bg_gradient(slide, gc, fallback=ds.primary_color)
+    elif bg == "gradient":
+        _bg_gradient(slide, [ds.accent_color, ds.primary_color],
+                     fallback=ds.primary_color)
     else:
-        fill.solid()
-        fill.fore_color.rgb = parse_color(design_notes.get('background', '#02428E'))
-    
-    # Add title
-    left = Inches(0.5)
-    top = Inches(2.5)
-    width = Inches(9)
-    height = Inches(1.5)
-    title_box = slide.shapes.add_textbox(left, top, width, height)
-    title_frame = title_box.text_frame
-    title_frame.word_wrap = True
-    
-    title_para = title_frame.paragraphs[0]
-    title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(54)
-    title_para.font.bold = True
-    title_para.font.color.rgb = parse_color(design_notes.get('text_color', '#FFFFFF'))
-    title_para.alignment = PP_ALIGN.CENTER
-    
-    # Add subtitle
-    subtitle_box = slide.shapes.add_textbox(Inches(0.5), Inches(4.2), Inches(9), Inches(1.5))
-    subtitle_frame = subtitle_box.text_frame
-    subtitle_frame.word_wrap = True
-    
-    subtitle_para = subtitle_frame.paragraphs[0]
-    subtitle_para.text = slide_data.get('subtitle', '')
-    subtitle_para.font.size = Pt(24)
-    subtitle_para.font.color.rgb = parse_color(design_notes.get('text_color', '#FFFFFF'))
-    subtitle_para.alignment = PP_ALIGN.CENTER
+        _bg_solid(slide, bg)
 
 
-def _create_content_slide(prs: Presentation, slide_data: dict, design_system: dict):
-    """Create a standard content slide with bullets."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank layout
-    background = slide.background
-    fill = background.fill
-    fill.solid()
-    
-    design_notes = slide_data.get('design_notes', {})
-    fill.fore_color.rgb = parse_color(design_notes.get('background', '#FFFFFF'))
-    
-    # Add title with accent line
-    title_top = Inches(0.35)
-    title_left = Inches(0.5)
-    
-    title_box = slide.shapes.add_textbox(title_left, title_top, Inches(9), Inches(0.6))
-    title_frame = title_box.text_frame
-    title_para = title_frame.paragraphs[0]
-    title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(40)
-    title_para.font.bold = True
-    title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
-    
-    # Add accent line below title
-    if design_notes.get('accent_line') == 'yes':
-        line = slide.shapes.add_shape(1, title_left, Inches(1.05), Inches(9), Inches(0.05))
-        line.fill.solid()
-        line.fill.fore_color.rgb = parse_color(design_system.get('accent_color', '#F26633'))
-        line.line.color.rgb = parse_color(design_system.get('accent_color', '#F26633'))
-    
-    # Add content bullets
-    content = slide_data.get('content', {})
-    bullets = content.get('bullets', [])
-    
-    bullet_top = Inches(1.3)
-    bullet_left = Inches(0.7)
-    bullet_width = Inches(8.6)
-    
-    bullet_box = slide.shapes.add_textbox(bullet_left, bullet_top, bullet_width, Inches(5.5))
-    text_frame = bullet_box.text_frame
-    text_frame.word_wrap = True
-    
-    for idx, bullet in enumerate(bullets):
-        if idx > 0:
-            text_frame.add_paragraph()
-        
-        para = text_frame.paragraphs[idx]
-        para.text = bullet.get('text', '')
-        para.level = bullet.get('level', 1) - 1
-        para.font.size = Pt(15 if para.level == 0 else 13)
-        para.font.bold = bullet.get('emphasis', 'normal') == 'bold'
-        
-        if bullet.get('accent') == 'orange':
-            para.font.color.rgb = parse_color(design_system.get('accent_color', '#F26633'))
-        else:
-            para.font.color.rgb = parse_color(design_system.get('text_color', '#000000'))
-        
-        para.space_before = Pt(6)
-        para.space_after = Pt(6)
-    
-    # Add callout box if present
-    callout = design_notes.get('callout_box')
-    if callout and callout.get('text'):
-        callout_left = Inches(0.7)
-        callout_top = Inches(6.0)
-        callout_width = Inches(8.6)
-        callout_height = Inches(0.9)
-        
-        box = slide.shapes.add_shape(1, callout_left, callout_top, callout_width, callout_height)
-        box.fill.solid()
-        box.fill.fore_color.rgb = parse_color(callout.get('background_color', '#F26633'))
-        box.line.color.rgb = parse_color(callout.get('background_color', '#F26633'))
-        
-        box_text = box.text_frame
-        box_text.word_wrap = True
-        box_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        
-        callout_para = box_text.paragraphs[0]
-        callout_para.text = callout.get('text', '')
-        callout_para.font.size = Pt(14)
-        callout_para.font.bold = True
-        callout_para.font.color.rgb = parse_color(callout.get('text_color', '#FFFFFF'))
-        callout_para.alignment = PP_ALIGN.CENTER
+# ---------------------------------------------------------------------------
+# Slide creators  — one per slide_type in the prompt schema
+# ---------------------------------------------------------------------------
+
+# ---- title ----------------------------------------------------------------
+def _slide_title(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
+    slide = _blank_slide(prs)
+    dn = sd.get("design_notes", {})
+    _resolve_bg(slide, dn, ds, dark_default=ds.primary_color)
+
+    title_color    = dn.get("title_color",    ds.text_on_dark)
+    subtitle_color = dn.get("subtitle_color", ds.text_on_dark)
+
+    _, _, p = _textbox(slide, MARGIN_L, Inches(2.2), CONTENT_W, Inches(1.9))
+    _fmt(p, sd.get("title", ""), ds.title_pt,
+         bold=True, color=title_color, align=PP_ALIGN.CENTER, font_name=ds.font_title)
+
+    _, _, p = _textbox(slide, MARGIN_L, Inches(4.2), CONTENT_W, Inches(0.9))
+    _fmt(p, sd.get("subtitle", ""), 20,
+         color=subtitle_color, align=PP_ALIGN.CENTER, font_name=ds.font_body)
+
+    presenter = sd.get("presenter_info", "")
+    if presenter:
+        _, _, p = _textbox(slide, MARGIN_L, Inches(5.2), CONTENT_W, Inches(0.5))
+        _fmt(p, presenter, 14, color=subtitle_color, align=PP_ALIGN.CENTER,
+             font_name=ds.font_body)
+
+    if HEADER_IMAGE.exists():
+        try:
+            slide.shapes.add_picture(
+                str(HEADER_IMAGE),
+                Inches(7.5), Inches(0.15),
+                width=Inches(2.2), height=Inches(0.36),
+            )
+        except Exception as e:
+            log.warning("Header image failed: %s", e)
 
 
-def _create_two_column_slide(prs: Presentation, slide_data: dict, design_system: dict):
-    """Create a two-column content slide."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    background = slide.background
-    fill = background.fill
-    fill.solid()
-    fill.fore_color.rgb = parse_color('#FFFFFF')
-    
-    # Add title
-    title_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.35), Inches(9), Inches(0.6))
-    title_frame = title_box.text_frame
-    title_para = title_frame.paragraphs[0]
-    title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(40)
-    title_para.font.bold = True
-    title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
-    
-    # Add two columns
-    columns = slide_data.get('columns', [])
-    col_top = Inches(1.2)
-    col_height = Inches(5.8)
-    
-    for col_idx, column in enumerate(columns):
-        col_left = Inches(0.5 + col_idx * 4.9)
-        col_width = Inches(4.6)
-        
-        # Column header
-        header_box = slide.shapes.add_textbox(col_left, col_top, col_width, Inches(0.4))
-        header_frame = header_box.text_frame
-        header_para = header_frame.paragraphs[0]
-        header_para.text = column.get('header', '')
-        header_para.font.size = Pt(18)
-        header_para.font.bold = True
-        
-        # Column content
-        content_box = slide.shapes.add_textbox(col_left, Inches(1.8), col_width, col_height)
-        content_frame = content_box.text_frame
-        content_frame.word_wrap = True
-        
-        items = column.get('content', {}).get('items', [])
-        for item_idx, item in enumerate(items):
-            if item_idx > 0:
-                content_frame.add_paragraph()
-            
-            para = content_frame.paragraphs[item_idx]
-            para.text = item
-            para.font.size = Pt(13)
-            para.space_before = Pt(4)
-            para.space_after = Pt(4)
+# ---- content --------------------------------------------------------------
+def _slide_content(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
+    slide = _blank_slide(prs)
+    dn = sd.get("design_notes", {})
+    _bg_solid(slide, dn.get("background", ds.bg_color))
+
+    _title_box(slide, sd.get("title", ""), ds, top=Inches(0.3), pt=CONTENT_TITLE_PT)
+
+    accent_color = _get_accent_line_color(sd, ds)
+    if _accent_line_wanted(sd):
+        _accent_line(slide, top=Inches(0.95), color=accent_color)
+
+    subtitle    = sd.get("subtitle", "")
+    has_subtitle = bool(subtitle)
+    if has_subtitle:
+        _subtitle_box(slide, subtitle, ds, top=Inches(1.05))
+
+    bullets = _get_bullets(sd)
+    callout = _get_callout(sd)
+    b_top = Inches(1.55) if has_subtitle else Inches(1.2)
+    b_h   = Inches(4.3)  if callout      else Inches(5.6)
+
+    _render_bullets(slide, bullets, ds,
+                    left=Inches(0.6), top=b_top,
+                    width=Inches(8.8), height=b_h)
+
+    if callout:
+        _colored_box(
+            slide, callout["text"],
+            left=Inches(0.6), top=Inches(6.05),
+            width=Inches(8.8), height=Inches(0.75),
+            bg=callout.get("background_color", ds.accent_color),
+            fg=callout.get("text_color", FB_WHITE),
+            pt=14, font_name=ds.font_body,
+        )
 
 
-def _create_image_text_slide(prs: Presentation, slide_data: dict, design_system: dict):
-    """Create a slide with image and text."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    background = slide.background
-    fill = background.fill
-    fill.solid()
-    fill.fore_color.rgb = parse_color('#FFFFFF')
-    
-    # Add title
-    title_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.35), Inches(9), Inches(0.6))
-    title_frame = title_box.text_frame
-    title_para = title_frame.paragraphs[0]
-    title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(40)
-    title_para.font.bold = True
-    title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
-    
-    # Placeholder for image (would need actual image file)
-    image_desc_box = slide.shapes.add_textbox(Inches(0.7), Inches(1.3), Inches(4.5), Inches(5.2))
-    image_frame = image_desc_box.text_frame
-    image_para = image_frame.paragraphs[0]
-    image_para.text = "[Image Placeholder]\n\n" + slide_data.get('image', {}).get('description', '')
-    image_para.font.size = Pt(14)
-    image_para.font.italic = True
-    image_para.font.color.rgb = RGBColor(128, 128, 128)
-    
-    # Add content bullets
-    content_box = slide.shapes.add_textbox(Inches(5.5), Inches(1.3), Inches(4), Inches(5.2))
-    text_frame = content_box.text_frame
-    text_frame.word_wrap = True
-    
-    bullets = slide_data.get('content', {}).get('bullets', [])
-    for idx, bullet in enumerate(bullets):
-        if idx > 0:
-            text_frame.add_paragraph()
-        
-        para = text_frame.paragraphs[idx]
-        para.text = bullet.get('text', '')
-        para.font.size = Pt(14)
-        para.font.bold = bullet.get('emphasis', 'normal') == 'bold'
-        para.space_before = Pt(4)
-        para.space_after = Pt(4)
+# ---- two_column -----------------------------------------------------------
+def _slide_two_column(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
+    """
+    Prompt schema: left_column / right_column, each with
+    header, width_pct, content_type, items[], chart_or_image_description.
+    design_notes: gutter_px, left_accent_color, right_accent_color.
+    """
+    slide = _blank_slide(prs)
+    dn = sd.get("design_notes", {})
+    _bg_solid(slide, dn.get("background", ds.bg_color))
+    _title_box(slide, sd.get("title", ""), ds, top=Inches(0.3), pt=CONTENT_TITLE_PT)
+    _accent_line(slide, top=Inches(0.95), color=ds.accent_color)
+
+    col_defs = [
+        (sd.get("left_column",  {}), Inches(0.5),
+         dn.get("left_accent_color",  ds.accent_color)),
+        (sd.get("right_column", {}), Inches(5.3),
+         dn.get("right_accent_color", ds.primary_color)),
+    ]
+    col_w   = Inches(4.5)
+    col_top = Inches(1.15)
+
+    for col, col_left, hdr_color in col_defs:
+        if not col:
+            continue
+        header = col.get("header", "")
+        items  = col.get("items", [])
+
+        _, _, hp = _textbox(slide, col_left, col_top, col_w, Inches(0.45))
+        _fmt(hp, header, 18, bold=True, color=hdr_color, font_name=ds.font_title)
+
+        _accent_line(slide, top=col_top + Inches(0.49),
+                     left=col_left, width=col_w, color=hdr_color)
+
+        _render_str_list(slide, items, ds.text_on_light,
+                         left=col_left, top=col_top + Inches(0.62),
+                         width=col_w, height=Inches(5.0), pt=14,
+                         font_name=ds.font_body)
 
 
-def _create_data_chart_slide(prs: Presentation, slide_data: dict, design_system: dict):
-    """Create a data/chart slide."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    background = slide.background
-    fill = background.fill
-    fill.solid()
-    fill.fore_color.rgb = parse_color('#FFFFFF')
-    
-    # Add title
-    title_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.35), Inches(9), Inches(0.6))
-    title_frame = title_box.text_frame
-    title_para = title_frame.paragraphs[0]
-    title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(40)
-    title_para.font.bold = True
-    title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
-    
-    # Chart placeholder
-    chart_desc_box = slide.shapes.add_textbox(Inches(1), Inches(1.3), Inches(8), Inches(3.5))
-    chart_frame = chart_desc_box.text_frame
-    chart_para = chart_frame.paragraphs[0]
-    
-    chart_data = slide_data.get('chart', {})
-    chart_para.text = f"[{chart_data.get('chart_type', 'Chart')} Chart]\n\n{chart_data.get('description', '')}"
-    chart_para.font.size = Pt(16)
-    chart_para.font.italic = True
-    chart_para.font.color.rgb = RGBColor(128, 128, 128)
-    chart_para.alignment = PP_ALIGN.CENTER
-    
-    # Add key insight callout
-    insight = slide_data.get('key_insight', {})
-    if insight and insight.get('text'):
-        insight_left = Inches(1)
-        insight_top = Inches(5.3)
-        insight_width = Inches(8)
-        insight_height = Inches(0.9)
-        
-        box = slide.shapes.add_shape(1, insight_left, insight_top, insight_width, insight_height)
-        box.fill.solid()
-        box.fill.fore_color.rgb = parse_color(insight.get('background_color', '#F26633'))
-        
-        box_text = box.text_frame
-        box_text.word_wrap = True
-        box_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        
-        insight_para = box_text.paragraphs[0]
-        insight_para.text = insight.get('text', '')
-        insight_para.font.size = Pt(16)
-        insight_para.font.bold = True
-        insight_para.font.color.rgb = parse_color(insight.get('text_color', '#FFFFFF'))
-        insight_para.alignment = PP_ALIGN.CENTER
+# ---- data_chart -----------------------------------------------------------
+def _slide_data_chart(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
+    """
+    Prompt schema: chart.{chart_type, title, description, x_axis_label,
+    y_axis_label, data_series[]}, key_insight.
+    Renders a real pptx chart when data is numeric, otherwise falls back to text.
+    """
+    slide = _blank_slide(prs)
+    dn = sd.get("design_notes", {})
+    _bg_solid(slide, dn.get("background", ds.bg_color))
+
+    _title_box(slide, sd.get("title", ""), ds, top=Inches(0.3), pt=CONTENT_TITLE_PT)
+
+    subtitle = sd.get("subtitle", "")
+    if subtitle:
+        _subtitle_box(slide, subtitle, ds, top=Inches(1.0))
+
+    chart_spec  = sd.get("chart", {})
+    data_series = chart_spec.get("data_series", [])
+    chart_type_str = chart_spec.get("chart_type", "bar").lower()
+    xl_chart_type  = CHART_TYPE_MAP.get(chart_type_str, XL_CHART_TYPE.BAR_CLUSTERED)
+
+    chart_top = Inches(1.55) if subtitle else Inches(1.2)
+    chart_h   = Inches(3.8)
+    chart_left = Inches(0.8)
+    chart_w    = Inches(8.4)
+
+    rendered_chart = False
+    if data_series:
+        try:
+            chart_data = CategoryChartData()
+            first_series = data_series[0]
+            labels = first_series.get("labels", [])
+            chart_data.categories = labels
+
+            for series in data_series:
+                s_name = series.get("series_name", "Data")
+                raw_values = series.get("values", [])
+                numeric_vals = []
+                for v in raw_values:
+                    numeric_vals.append(float(str(v).replace(",", "").replace("$", "")))
+                chart_data.add_series(s_name, numeric_vals)
+
+            graphic_frame = slide.shapes.add_chart(
+                xl_chart_type, chart_left, chart_top, chart_w, chart_h, chart_data
+            )
+            chart_obj = graphic_frame.chart
+            chart_obj.has_legend = len(data_series) > 1
+
+            x_label = chart_spec.get("x_axis_label", "")
+            y_label = chart_spec.get("y_axis_label", "")
+            if hasattr(chart_obj, "category_axis") and x_label:
+                chart_obj.category_axis.has_title = True
+                chart_obj.category_axis.axis_title.text_frame.paragraphs[0].text = x_label
+            if hasattr(chart_obj, "value_axis") and y_label:
+                chart_obj.value_axis.has_title = True
+                chart_obj.value_axis.axis_title.text_frame.paragraphs[0].text = y_label
+
+            # Apply series colour from JSON
+            for idx, series in enumerate(data_series):
+                s_color = series.get("color")
+                if s_color and idx < len(chart_obj.series):
+                    chart_obj.series[idx].format.fill.solid()
+                    chart_obj.series[idx].format.fill.fore_color.rgb = _rgb(s_color)
+
+            rendered_chart = True
+            log.info("    Chart rendered: %s (%s)", chart_spec.get("title", ""), chart_type_str)
+        except Exception as e:
+            log.warning("    Chart rendering failed, using text fallback: %s", e)
+
+    if not rendered_chart:
+        lines = [f"[{chart_type_str.upper()} CHART] {chart_spec.get('title', '')}"]
+        desc = chart_spec.get("description", "")
+        if desc:
+            lines.append(desc)
+        for series in data_series:
+            for lbl, val in zip(series.get("labels", []), series.get("values", [])):
+                lines.append(f"  {lbl}: {val}")
+
+        _, tf, _ = _textbox(slide, chart_left, chart_top, chart_w, chart_h)
+        for i, line in enumerate(lines):
+            para = tf.paragraphs[i] if i == 0 else tf.add_paragraph()
+            para.text           = line
+            para.font.size      = Pt(16 if i == 0 else 13)
+            para.font.bold      = (i == 0)
+            para.font.name      = ds.font_body
+            para.font.color.rgb = _rgb(ds.primary_color if i == 0 else ds.text_on_light)
+            para.alignment      = PP_ALIGN.CENTER if i == 0 else PP_ALIGN.LEFT
+
+    # Key insight callout
+    insight = sd.get("key_insight", {})
+    if insight and insight.get("text"):
+        _colored_box(
+            slide, insight["text"],
+            left=Inches(0.8), top=Inches(5.6),
+            width=Inches(8.4), height=Inches(0.85),
+            bg=insight.get("background_color", ds.primary_color),
+            fg=insight.get("text_color", FB_WHITE),
+            pt=14, font_name=ds.font_body,
+        )
 
 
-def _create_centered_slide(prs: Presentation, slide_data: dict, design_system: dict):
-    """Create a centered content slide."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    background = slide.background
-    fill = background.fill
-    fill.solid()
-    fill.fore_color.rgb = parse_color('#FFFFFF')
-    
-    # Add centered title
-    title_box = slide.shapes.add_textbox(Inches(1), Inches(2.5), Inches(8), Inches(1.5))
-    title_frame = title_box.text_frame
-    title_frame.word_wrap = True
-    
-    title_para = title_frame.paragraphs[0]
-    title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(48)
-    title_para.font.bold = True
-    title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
-    title_para.alignment = PP_ALIGN.CENTER
-    
-    # Add subtitle
-    subtitle_box = slide.shapes.add_textbox(Inches(1), Inches(4.2), Inches(8), Inches(1))
-    subtitle_frame = subtitle_box.text_frame
-    subtitle_frame.word_wrap = True
-    
-    subtitle_para = subtitle_frame.paragraphs[0]
-    subtitle_para.text = slide_data.get('subtitle', '')
-    subtitle_para.font.size = Pt(20)
-    subtitle_para.font.color.rgb = parse_color(design_system.get('text_color', '#000000'))
-    subtitle_para.alignment = PP_ALIGN.CENTER
+# ---- image_text -----------------------------------------------------------
+def _slide_image_text(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
+    """Prompt schema: same as content but with an image area."""
+    slide = _blank_slide(prs)
+    dn = sd.get("design_notes", {})
+    _bg_solid(slide, dn.get("background", ds.bg_color))
+
+    _title_box(slide, sd.get("title", ""), ds, top=Inches(0.3), pt=CONTENT_TITLE_PT)
+
+    image_desc = sd.get("image", {}).get("description", "")
+    _, _, p = _textbox(slide, Inches(0.6), Inches(1.3), Inches(4.5), Inches(5.2))
+    _fmt(p, f"[Image Placeholder]\n\n{image_desc}", 14,
+         italic=True, color="#808080", font_name=ds.font_body)
+
+    bullets = _get_bullets(sd)
+    _render_bullets(slide, bullets, ds,
+                    left=Inches(5.5), top=Inches(1.3),
+                    width=Inches(4.0), height=Inches(5.2))
 
 
-def _create_comparison_slide(prs: Presentation, slide_data: dict, design_system: dict):
-    """Create a before/after comparison slide."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    background = slide.background
-    fill = background.fill
-    fill.solid()
-    fill.fore_color.rgb = parse_color('#FFFFFF')
-    
-    # Add title
-    title_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.35), Inches(9), Inches(0.6))
-    title_frame = title_box.text_frame
-    title_para = title_frame.paragraphs[0]
-    title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(40)
-    title_para.font.bold = True
-    title_para.font.color.rgb = parse_color(design_system.get('header_color', '#02428E'))
-    
-    # Create two comparison boxes
-    columns = slide_data.get('columns', [])
-    col_width = Inches(4.3)
+# ---- centered_content -----------------------------------------------------
+def _slide_centered(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
+    slide = _blank_slide(prs)
+    dn = sd.get("design_notes", {})
+    _resolve_bg(slide, dn, ds)
+
+    gc = dn.get("gradient_colors", [])
+    bg = dn.get("background", ds.bg_color)
+    is_dark = bool(gc) or (bg not in (FB_BG, "#FFFFFF", ds.bg_color))
+    text_color = ds.text_on_dark if is_dark else ds.text_on_light
+
+    accent_els = sd.get("accent_elements", {})
+    line_color = accent_els.get("line_color", ds.accent_color)
+
+    if accent_els.get("lines_before") in (True, "true"):
+        _accent_line(slide, top=Inches(1.95),
+                     left=Inches(1.2), width=Inches(7.6), color=line_color)
+
+    _, _, p = _textbox(slide, Inches(0.8), Inches(2.15), Inches(8.4), Inches(1.5))
+    _fmt(p, sd.get("title", ""), ds.title_pt,
+         bold=True, color=text_color, align=PP_ALIGN.CENTER, font_name=ds.font_title)
+
+    subtitle = sd.get("subtitle", "")
+    if subtitle:
+        _, _, p = _textbox(slide, Inches(0.8), Inches(3.75), Inches(8.4), Inches(0.7))
+        _fmt(p, subtitle, 18, color=text_color, align=PP_ALIGN.CENTER,
+             font_name=ds.font_body)
+
+    points = sd.get("supporting_points", [])
+    if points:
+        _, tf, _ = _textbox(slide, Inches(1.5), Inches(4.55), Inches(7), Inches(1.8))
+        tf.word_wrap = True
+        for i, pt_text in enumerate(points):
+            para = tf.paragraphs[i] if i == 0 else tf.add_paragraph()
+            para.text           = f"\u2022 {pt_text}"
+            para.font.size      = Pt(ds.body_pt)
+            para.font.name      = ds.font_body
+            para.font.color.rgb = _rgb(text_color)
+            para.alignment      = PP_ALIGN.CENTER
+            para.space_before   = Pt(4)
+
+    if accent_els.get("lines_after") in (True, "true"):
+        _accent_line(slide, top=Inches(6.45),
+                     left=Inches(1.2), width=Inches(7.6), color=line_color)
+
+
+# ---- comparison -----------------------------------------------------------
+def _slide_comparison(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
+    """
+    Prompt schema: left_column / right_column, each with
+    label, background_color, text_color, items[].
+    Renders as two side-by-side coloured boxes.
+    """
+    slide = _blank_slide(prs)
+    dn = sd.get("design_notes", {})
+    _bg_solid(slide, dn.get("background", ds.bg_color))
+    _title_box(slide, sd.get("title", ""), ds, top=Inches(0.3), pt=CONTENT_TITLE_PT)
+
+    col_width  = Inches(4.3)
     col_height = Inches(5.2)
-    col_top = Inches(1.3)
-    
-    for col_idx, column in enumerate(columns):
-        col_left = Inches(0.5 + col_idx * 4.8)
-        
-        # Background box for column
+    col_top    = Inches(1.3)
+
+    col_defs = [
+        (sd.get("left_column",  {}), Inches(0.5)),
+        (sd.get("right_column", {}), Inches(5.3)),
+    ]
+
+    for col, col_left in col_defs:
+        if not col:
+            continue
+        bg_c = col.get("background_color", ds.primary_color)
+        fg_c = col.get("text_color", FB_WHITE)
+        label = col.get("label", col.get("column_label", ""))
+
         box = slide.shapes.add_shape(1, col_left, col_top, col_width, col_height)
         box.fill.solid()
-        box.fill.fore_color.rgb = parse_color(column.get('background_color', '#02428E'))
-        box.line.color.rgb = parse_color(column.get('background_color', '#02428E'))
-        
-        # Column label
-        label_box = slide.shapes.add_textbox(col_left + Inches(0.1), col_top + Inches(0.1), col_width - Inches(0.2), Inches(0.4))
-        label_frame = label_box.text_frame
-        label_para = label_frame.paragraphs[0]
-        label_para.text = column.get('column_label', '')
-        label_para.font.size = Pt(16)
-        label_para.font.bold = True
-        label_para.font.color.rgb = parse_color(column.get('text_color', '#FFFFFF'))
-        label_para.alignment = PP_ALIGN.CENTER
-        
-        # Items
-        items_box = slide.shapes.add_textbox(col_left + Inches(0.15), col_top + Inches(0.6), col_width - Inches(0.3), col_height - Inches(0.8))
-        items_frame = items_box.text_frame
-        items_frame.word_wrap = True
-        
-        items = column.get('items', [])
-        for item_idx, item in enumerate(items):
-            if item_idx > 0:
-                items_frame.add_paragraph()
-            
-            para = items_frame.paragraphs[item_idx]
-            para.text = f"• {item}"
-            para.font.size = Pt(12)
-            para.font.color.rgb = parse_color(column.get('text_color', '#FFFFFF'))
-            para.space_before = Pt(3)
-            para.space_after = Pt(3)
-            para.level = 0
+        box.fill.fore_color.rgb = _rgb(bg_c)
+        box.line.color.rgb      = _rgb(bg_c)
+
+        _, _, lp = _textbox(slide, col_left + Inches(0.1), col_top + Inches(0.1),
+                            col_width - Inches(0.2), Inches(0.4))
+        _fmt(lp, label, 16, bold=True, color=fg_c,
+             align=PP_ALIGN.CENTER, font_name=ds.font_title)
+
+        items = col.get("items", [])
+        if items:
+            _, tf, _ = _textbox(slide, col_left + Inches(0.15),
+                                col_top + Inches(0.6),
+                                col_width - Inches(0.3),
+                                col_height - Inches(0.8))
+            for i, item in enumerate(items):
+                para = tf.paragraphs[i] if i == 0 else tf.add_paragraph()
+                para.text           = f"\u2022 {item}"
+                para.font.size      = Pt(12)
+                para.font.name      = ds.font_body
+                para.font.color.rgb = _rgb(fg_c)
+                para.space_before   = Pt(3)
+                para.space_after    = Pt(3)
 
 
-def _create_closing_slide(prs: Presentation, slide_data: dict, design_system: dict):
-    """Create a closing/CTA slide."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    background = slide.background
-    fill = background.fill
-    
-    # Set gradient background
-    design_notes = slide_data.get('design_notes', {})
-    fill.gradient()
-    fill.gradient_angle = 45.0
-    fill.gradient_stops[0].color.rgb = parse_color('#02428E')
-    fill.gradient_stops[1].color.rgb = parse_color('#00498F')
-    
-    # Add title
-    title_box = slide.shapes.add_textbox(Inches(0.5), Inches(2), Inches(9), Inches(1))
-    title_frame = title_box.text_frame
-    title_frame.word_wrap = True
-    
-    title_para = title_frame.paragraphs[0]
-    title_para.text = slide_data.get('title', '')
-    title_para.font.size = Pt(54)
-    title_para.font.bold = True
-    title_para.font.color.rgb = parse_color('#FFFFFF')
-    title_para.alignment = PP_ALIGN.CENTER
-    
-    # Add subtitle
-    subtitle_box = slide.shapes.add_textbox(Inches(0.5), Inches(3.2), Inches(9), Inches(0.8))
-    subtitle_frame = subtitle_box.text_frame
-    subtitle_frame.word_wrap = True
-    
-    subtitle_para = subtitle_frame.paragraphs[0]
-    subtitle_para.text = slide_data.get('subtitle', '')
-    subtitle_para.font.size = Pt(18)
-    subtitle_para.font.color.rgb = parse_color('#FFFFFF')
-    subtitle_para.alignment = PP_ALIGN.CENTER
-    
-    # Add contact info
-    contact_info = slide_data.get('contact_info', {})
-    contact_box = slide.shapes.add_textbox(Inches(1), Inches(4.5), Inches(8), Inches(1.5))
-    contact_frame = contact_box.text_frame
-    contact_frame.word_wrap = True
-    
-    contact_items = [
-        contact_info.get('name', ''),
-        contact_info.get('email', ''),
-        contact_info.get('phone', ''),
-    ]
-    
-    for idx, contact_item in enumerate(contact_items):
-        if contact_item:
-            if idx > 0:
-                contact_frame.add_paragraph()
-            
-            para = contact_frame.paragraphs[idx]
-            para.text = contact_item
-            para.font.size = Pt(14)
-            para.font.color.rgb = parse_color('#FFFFFF')
-            para.alignment = PP_ALIGN.CENTER
-    
-    # Add CTA button (as a shape)
-    cta = slide_data.get('cta_button', {})
-    if cta and cta.get('text'):
-        btn_left = Inches(3)
-        btn_top = Inches(6.2)
-        btn_width = Inches(4)
-        btn_height = Inches(0.6)
-        
-        btn = slide.shapes.add_shape(1, btn_left, btn_top, btn_width, btn_height)
-        btn.fill.solid()
-        btn.fill.fore_color.rgb = parse_color(cta.get('background_color', '#F26633'))
-        btn.line.color.rgb = parse_color(cta.get('background_color', '#F26633'))
-        
-        btn_text = btn.text_frame
-        btn_text.word_wrap = True
-        btn_text.vertical_anchor = MSO_ANCHOR.MIDDLE
-        
-        btn_para = btn_text.paragraphs[0]
-        btn_para.text = cta.get('text', '')
-        btn_para.font.size = Pt(16)
-        btn_para.font.bold = True
-        btn_para.font.color.rgb = parse_color(cta.get('text_color', '#FFFFFF'))
-        btn_para.alignment = PP_ALIGN.CENTER
+# ---- closing --------------------------------------------------------------
+def _slide_closing(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
+    slide = _blank_slide(prs)
+    dn = sd.get("design_notes", {})
+    _resolve_bg(slide, dn, ds, dark_default=ds.primary_color)
+
+    _, _, p = _textbox(slide, MARGIN_L, Inches(1.5), CONTENT_W, Inches(1.3))
+    _fmt(p, sd.get("title", ""), ds.title_pt,
+         bold=True, color=ds.text_on_dark, align=PP_ALIGN.CENTER,
+         font_name=ds.font_title)
+
+    subtitle = sd.get("subtitle", "")
+    if subtitle:
+        _, _, p = _textbox(slide, MARGIN_L, Inches(2.9), CONTENT_W, Inches(0.7))
+        _fmt(p, subtitle, 18,
+             color=ds.text_on_dark, align=PP_ALIGN.CENTER, font_name=ds.font_body)
+
+    next_steps = sd.get("next_steps", [])
+    if next_steps:
+        _render_str_list(slide, next_steps, ds.text_on_dark,
+                         left=Inches(1.2), top=Inches(3.7),
+                         width=Inches(7.6), height=Inches(1.0),
+                         pt=14, font_name=ds.font_body,
+                         bullet_prefix="\u2192 ")
+
+    contact = sd.get("contact_info", {})
+    lines   = [v for v in contact.values() if v]
+    if lines:
+        _, tf, _ = _textbox(slide, Inches(1), Inches(4.8), Inches(8), Inches(1.2))
+        tf.word_wrap = True
+        for i, line in enumerate(lines):
+            para = tf.paragraphs[i] if i == 0 else tf.add_paragraph()
+            para.text           = line
+            para.font.size      = Pt(13)
+            para.font.name      = ds.font_body
+            para.font.color.rgb = _rgb(ds.text_on_dark)
+            para.alignment      = PP_ALIGN.CENTER
+            para.space_before   = Pt(3)
+
+    cta = sd.get("cta_button", {})
+    if cta and cta.get("text"):
+        _colored_box(
+            slide, cta["text"],
+            left=Inches(2.8), top=Inches(6.25),
+            width=Inches(4.4), height=Inches(0.65),
+            bg=cta.get("background_color", ds.accent_color),
+            fg=cta.get("text_color", FB_WHITE),
+            pt=16, font_name=ds.font_body,
+        )
 
 
+# ---------------------------------------------------------------------------
+# Dispatch table
+# ---------------------------------------------------------------------------
+HANDLERS: Dict[str, callable] = {
+    "title":            _slide_title,
+    "content":          _slide_content,
+    "two_column":       _slide_two_column,
+    "data_chart":       _slide_data_chart,
+    "image_text":       _slide_image_text,
+    "centered_content": _slide_centered,
+    "comparison":       _slide_comparison,
+    "closing":          _slide_closing,
+}
+
+
+# ---------------------------------------------------------------------------
+# JSON loader
+# ---------------------------------------------------------------------------
+def load_json(path: str) -> dict:
+    text = Path(path).read_text(encoding="utf-8").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\n?", "", text)
+        text = re.sub(r"\n?```$",          "", text)
+    data = json.loads(text)
+    log.info("Loaded JSON: %s", path)
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Core builder
+# ---------------------------------------------------------------------------
+def create_presentation(data: dict, output: str) -> str:
+    prs = Presentation()
+    prs.slide_width  = SLIDE_WIDTH
+    prs.slide_height = SLIDE_HEIGHT
+
+    meta   = data.get("presentation_metadata", {})
+    ds     = DesignSystem.from_dict(data.get("design_system_reference", {}))
+    slides = data.get("slides", [])
+
+    log.info("Building: %s  (%d slides)", meta.get("title", "Untitled"), len(slides))
+
+    for sd in slides:
+        snum  = sd.get("slide_number", "?")
+        stype = sd.get("slide_type", "content")
+        fn    = HANDLERS.get(stype)
+        if fn is None:
+            log.warning("Slide %s: unknown type %r — skipped", snum, stype)
+            continue
+        log.info("  Slide [%s] type=%s", snum, stype)
+        fn(prs, sd, ds)
+        _footer(prs.slides[-1], ds)
+        _add_speaker_notes(prs.slides[-1], sd)
+
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    prs.save(output)
+    log.info("Saved → %s", output)
+    return output
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 def generate_presentation(
-    json_file: str = None,
-    output_file: str = None,
-    prospect_company: str = "juniper",
+    json_file: Optional[str]        = None,
+    output_file: Optional[str]      = None,
+    prospect_company: Optional[str] = None,
 ) -> str:
-    """Complete workflow: Generate PowerPoint from slide JSON.
-    
-    Args:
-        json_file: Path to slide JSON file
-        output_file: Path to save PowerPoint
-        prospect_company: Prospect company name for auto-detection
-    
-    Returns:
-        Path to the created PowerPoint file
-    """
-    # Auto-detect JSON file
     if json_file is None:
+        if not prospect_company:
+            raise ValueError("Provide json_file or prospect_company.")
         json_file = f"outputs/generated_slides/slides_{prospect_company}.json"
-    
-    # Auto-generate output file
+
     if output_file is None:
-        prospect_clean = prospect_company.lower().replace(' ', '_')
-        output_file = f"outputs/presentations/presentation_{prospect_clean}.pptx"
-    
-    # Ensure output directory exists
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    
-    print("=" * 60)
-    print("PPT Presentation Generator")
-    print("=" * 60)
-    
-    # Load slide JSON
-    slides_data = load_slide_json(json_file)
-    
-    # Create presentation
-    created_file = create_presentation(slides_data, output_file)
-    
-    print("\n" + "=" * 60)
-    print("Summary:")
-    print(f"  Input JSON: {json_file}")
-    print(f"  Output PPT: {created_file}")
-    print("=" * 60)
-    
-    return created_file
+        if not prospect_company:
+            raise ValueError("Provide output_file or prospect_company.")
+        slug = prospect_company.lower().replace(" ", "_")
+        ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = f"outputs/presentations/presentation_{slug}_{ts}.pptx"
+
+    data   = load_json(json_file)
+    result = create_presentation(data, output_file)
+    return result
 
 
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    """
-    Main execution - generates PowerPoint from slide JSON
-    """
-    PROSPECT_COMPANY = "juniper"
-    
-    result = generate_presentation(prospect_company=PROSPECT_COMPANY)
-    print(f"\nPresentation created successfully: {result}")
+    generate_presentation(prospect_company="juniper")

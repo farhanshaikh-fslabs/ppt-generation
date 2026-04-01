@@ -75,8 +75,8 @@ def validate_company_data(
 
 
 def run_full_pipeline(
-    seller_company: str = "icicilombard",
-    prospect_company: str = "juniper",
+    seller_company: str = None,
+    prospect_company: str = None,
     ppt_template: str = "templates/ppt-template.pptx",
     companies_table: str = None,
     skip_steps: Optional[list] = None,
