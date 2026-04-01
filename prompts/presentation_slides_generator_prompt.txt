@@ -53,7 +53,6 @@ Return output STRICTLY in the following JSON schema format:
 
 ## JSON SCHEMA FOR SLIDES OUTPUT
 
-```json
 {
   "presentation_metadata": {
     "title": "string - Overall presentation title",
@@ -293,7 +292,6 @@ Return output STRICTLY in the following JSON schema format:
     }
   ]
 }
-```
 
 ---
 

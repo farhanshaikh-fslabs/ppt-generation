@@ -111,7 +111,7 @@ def generate_theme_suggestion(
             model_id=model_id,
             messages=messages,
             system_prompt=THEME_SUGGESTION_SYSTEM_PROMPT,
-            max_tokens=4096,
+            max_tokens=10240,
             temperature=temperature,
         )
         

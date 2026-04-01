@@ -143,7 +143,7 @@ The output must be:
 5. Including all required fields for each slide
 
 Return ONLY the JSON object, no other text or markdown.""",
-            max_tokens=8192,
+            max_tokens=10240,
             temperature=temperature,
         )
         
