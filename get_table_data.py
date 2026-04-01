@@ -2,16 +2,24 @@ from storage_services.dynamodb_operations import get_company
 from core.config import DYNAMODB_COMPANIES_TABLE
 import boto3
 import json
+import logging
 import dotenv
 import os
 dotenv.load_dotenv()
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 AWS_REGION = os.getenv("AWS_REGION")
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 
-prospect_company_name = "juniper"
-seller_company_name = "icicilombard"
+prospect_company_name = os.getenv("DEFAULT_PROSPECT_COMPANY")
+seller_company_name = os.getenv("DEFAULT_SELLER_COMPANY")
+if not prospect_company_name or not seller_company_name:
+    raise ValueError("Set DEFAULT_PROSPECT_COMPANY and DEFAULT_SELLER_COMPANY in environment.")
 
 seller_company_data = get_company(DYNAMODB_COMPANIES_TABLE, seller_company_name, "seller")
 prospect_company_data = get_company(DYNAMODB_COMPANIES_TABLE, prospect_company_name, "prospect")
@@ -53,4 +61,4 @@ for event in response["body"]:
 with open("sample_content.md", "w", encoding="utf-8") as output_file:
     output_file.write(output_content)
 
-# print(output_content)
+logger.info("Wrote Bedrock output to sample_content.md")

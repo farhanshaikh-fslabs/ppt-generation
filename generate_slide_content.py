@@ -9,10 +9,17 @@ This script orchestrates the complete workflow:
 """
 
 import json
+import logging
 import os
 from storage_services.bedrock_operations import invoke_model, extract_content_from_response
 from storage_services.dynamodb_operations import get_company
 from core.config import BEDROCK_MODEL_ID, DYNAMODB_COMPANIES_TABLE
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # Ensure output directory exists
 os.makedirs("outputs/generated_slides", exist_ok=True)
@@ -30,10 +37,10 @@ def load_theme_suggestion(theme_file: str) -> str:
     try:
         with open(theme_file, 'r', encoding='utf-8') as f:
             theme_content = f.read()
-        print(f"[OK] Loaded theme suggestion from {theme_file}")
+        logger.info("Loaded theme suggestion from %s", theme_file)
         return theme_content
     except FileNotFoundError:
-        print(f"[ERROR] Theme file not found: {theme_file}")
+        logger.error("Theme file not found: %s", theme_file)
         raise
 
 
@@ -49,10 +56,10 @@ def load_generator_prompt(prompt_file: str) -> str:
     try:
         with open(prompt_file, 'r', encoding='utf-8') as f:
             prompt_content = f.read()
-        print(f"[OK] Loaded generator prompt from {prompt_file}")
+        logger.info("Loaded generator prompt from %s", prompt_file)
         return prompt_content
     except FileNotFoundError:
-        print(f"[ERROR] Prompt file not found: {prompt_file}")
+        logger.error("Prompt file not found: %s", prompt_file)
         raise
 
 
@@ -78,12 +85,12 @@ def get_company_data(
         seller_context = seller_data.get('structured_company_data', {})
         prospect_context = prospect_data.get('structured_company_data', {})
         
-        print(f"[OK] Loaded seller company data: {seller_name}")
-        print(f"[OK] Loaded prospect company data: {prospect_name}")
+        logger.info("Loaded seller company data: %s", seller_name)
+        logger.info("Loaded prospect company data: %s", prospect_name)
         
         return seller_context, prospect_context
     except Exception as e:
-        print(f"[ERROR] Error fetching company data: {e}")
+        logger.exception("Error fetching company data: %s", e)
         raise
 
 
@@ -123,8 +130,7 @@ def generate_slide_content(
         {"role": "user", "content": [{"text": user_prompt}]}
     ]
     
-    print(f"\nInvoking {model_id} to generate slide content...")
-    print("-" * 60)
+    logger.info("Invoking model %s to generate slide content", model_id)
     
     try:
         # Invoke the model
@@ -151,13 +157,13 @@ Return ONLY the JSON object, no other text or markdown.""",
         slide_content = extract_content_from_response(response)
         
         if slide_content:
-            print("[OK] Slide content generated successfully")
+            logger.info("Slide content generated successfully")
             return slide_content
         else:
-            print("[ERROR] Failed to extract content from model response")
+            logger.error("Failed to extract content from model response")
             return None
     except Exception as e:
-        print(f"[ERROR] Error generating slide content: {e}")
+        logger.exception("Error generating slide content: %s", e)
         raise
 
 
@@ -177,10 +183,10 @@ def save_slide_content(
     try:
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(slide_content)
-        print(f"[OK] Slide content saved to {output_file}")
+        logger.info("Slide content saved to %s", output_file)
         return output_file
     except Exception as e:
-        print(f"[ERROR] Error saving slide content: {e}")
+        logger.exception("Error saving slide content: %s", e)
         raise
 
 
@@ -217,21 +223,17 @@ def generate_slides(
         if os.path.exists(prospect_theme):
             theme_file = prospect_theme
         elif os.path.exists(template_theme):
-            print(f"[INFO] Using template theme: {template_theme}")
+            logger.info("Using template theme: %s", template_theme)
             theme_file = template_theme
         else:
-            print(f"[ERROR] No theme file found. Checked:")
-            print(f"  - {prospect_theme}")
-            print(f"  - {template_theme}")
+            logger.error("No theme file found. Checked: %s, %s", prospect_theme, template_theme)
             raise FileNotFoundError("Theme file not found")
     
     # Auto-generate output file path if not provided
     if output_file is None:
         output_file = f"outputs/generated_slides/slides_{prospect_company_name}.json"
     
-    print("=" * 60)
-    print("PPT Slide Content Generator")
-    print("=" * 60)
+    logger.info("PPT Slide Content Generator")
     
     # Step 1: Load theme suggestion
     theme_content = load_theme_suggestion(theme_file)
@@ -271,13 +273,13 @@ def generate_slides(
         "model_id": model_id,
     }
     
-    print("=" * 60)
-    print("Summary:")
-    print(f"  Seller: {seller_company_name}")
-    print(f"  Prospect: {prospect_company_name}")
-    print(f"  Theme: {theme_file}")
-    print(f"  Output: {saved_file}")
-    print("=" * 60)
+    logger.info(
+        "Summary: seller=%s prospect=%s theme=%s output=%s",
+        seller_company_name,
+        prospect_company_name,
+        theme_file,
+        saved_file,
+    )
     
     return result
 
@@ -286,25 +288,29 @@ if __name__ == "__main__":
     """
     Main execution - generates slides for specified companies
     """
-    # Configuration (customize as needed)
-    SELLER_COMPANY = "icicilombard"
-    PROSPECT_COMPANY = "juniper"
-    
-    # Run generation
+    seller_company = os.getenv("DEFAULT_SELLER_COMPANY")
+    prospect_company = os.getenv("DEFAULT_PROSPECT_COMPANY")
+    if not seller_company or not prospect_company:
+        raise ValueError(
+            "Missing DEFAULT_SELLER_COMPANY/DEFAULT_PROSPECT_COMPANY. "
+            "Set them in environment or call generate_slides() programmatically."
+        )
+
     result = generate_slides(
-        seller_company_name=SELLER_COMPANY,
-        prospect_company_name=PROSPECT_COMPANY,
+        seller_company_name=seller_company,
+        prospect_company_name=prospect_company,
     )
-    
-    print("\nGeneration Result:")
-    print(json.dumps(result, indent=2))
+    logger.info("Generation result:\n%s", json.dumps(result, indent=2))
     
     # Optionally parse and display the generated slides
     if result.get("status") == "success":
         try:
             with open(result["output_file"], 'r', encoding='utf-8') as f:
                 slides_data = json.load(f)
-            print(f"\nGenerated {slides_data['presentation_metadata']['total_slides']} slides")
-            print(f"Presentation: {slides_data['presentation_metadata']['title']}")
+            logger.info(
+                "Generated %s slides for presentation '%s'",
+                slides_data["presentation_metadata"]["total_slides"],
+                slides_data["presentation_metadata"]["title"],
+            )
         except Exception as e:
-            print(f"\n[WARNING] Could not parse generated slides: {e}")
+            logger.warning("Could not parse generated slides: %s", e)

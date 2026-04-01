@@ -12,10 +12,11 @@ Usage:
     
 Or programmatically:
     from run_ppt_generation import run_full_pipeline
-    result = run_full_pipeline(seller="icicilombard", prospect="juniper")
+    result = run_full_pipeline(seller_company="seller-name", prospect_company="prospect-name")
 """
 
 import json
+import logging
 import os
 from typing import Dict, Optional
 
@@ -24,6 +25,12 @@ from analyze_ppt import extract_design_system
 from suggest_ppt_theme import create_theme_guide
 from generate_slide_content import generate_slides
 from create_presentation import generate_presentation
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 def validate_ppt_template(ppt_file: str) -> bool:
@@ -36,9 +43,9 @@ def validate_ppt_template(ppt_file: str) -> bool:
         True if file exists, False otherwise
     """
     if not os.path.exists(ppt_file):
-        print(f"[ERROR] PPT template not found: {ppt_file}")
+        logger.error("PPT template not found: %s", ppt_file)
         return False
-    print(f"[OK] PPT template found: {ppt_file}")
+    logger.info("PPT template found: %s", ppt_file)
     return True
 
 
@@ -64,13 +71,13 @@ def validate_company_data(
         prospect_data = get_company(companies_table, prospect_name, "prospect")
         
         if seller_data and prospect_data:
-            print(f"[OK] Company data accessible")
-            print(f"     Seller: {seller_name}")
-            print(f"     Prospect: {prospect_name}")
+            logger.info("Company data accessible")
+            logger.info("Seller: %s", seller_name)
+            logger.info("Prospect: %s", prospect_name)
             return True
         return False
     except Exception as e:
-        print(f"[ERROR] Failed to access company data: {e}")
+        logger.exception("Failed to access company data: %s", e)
         return False
 
 
@@ -118,8 +125,7 @@ def run_full_pipeline(
     }
     
     # Pre-flight checks
-    print("\n[PHASE 0] Pre-flight Validation")
-    print("-" * 70)
+    logger.info("[PHASE 0] Pre-flight validation")
     
     if not validate_ppt_template(ppt_template):
         results["status"] = "failed"
@@ -133,8 +139,7 @@ def run_full_pipeline(
     
     # Step 1: Analyze PPT
     if 'analyze' not in skip_steps:
-        print("\n[PHASE 1] Analyzing PPT Template")
-        print("-" * 70)
+        logger.info("[PHASE 1] Analyzing PPT template")
         try:
             analysis_result = extract_design_system(ppt_template)
             
@@ -145,20 +150,19 @@ def run_full_pipeline(
                 "output_file": analysis_file,
                 "metadata": analysis_result.get("metadata", {}) if isinstance(analysis_result, dict) else None,
             }
-            print(f"[OK] PPT analysis completed")
+            logger.info("PPT analysis completed")
         except Exception as e:
-            print(f"[ERROR] PPT analysis failed: {e}")
+            logger.exception("PPT analysis failed: %s", e)
             results["steps"]["analyze_ppt"] = {"status": "failed", "error": str(e)}
             results["errors"].append(f"PPT analysis: {e}")
             return results
     else:
-        print("\n[PHASE 1] Skipped: Analyzing PPT Template")
+        logger.info("[PHASE 1] Skipped: analyzing PPT template")
         analysis_file = f"outputs/ppt_analysis/ppt_detailed_analysis_{ppt_template.split('/')[-1].split('.')[0]}.json"
     
     # Step 2: Generate Theme Suggestion
     if 'theme' not in skip_steps:
-        print("\n[PHASE 2] Generating Theme Suggestion")
-        print("-" * 70)
+        logger.info("[PHASE 2] Generating theme suggestion")
         try:
             theme_result = create_theme_guide()
             
@@ -167,19 +171,18 @@ def run_full_pipeline(
                 "output_file": theme_result.get("suggestion_file"),
                 "metadata": theme_result.get("ppt_metadata", {}),
             }
-            print(f"[OK] Theme suggestion completed")
+            logger.info("Theme suggestion completed")
         except Exception as e:
-            print(f"[ERROR] Theme suggestion failed: {e}")
+            logger.exception("Theme suggestion failed: %s", e)
             results["steps"]["generate_theme"] = {"status": "failed", "error": str(e)}
             results["errors"].append(f"Theme generation: {e}")
             return results
     else:
-        print("\n[PHASE 2] Skipped: Generating Theme Suggestion")
+        logger.info("[PHASE 2] Skipped: generating theme suggestion")
     
     # Step 3: Generate Slide Content
     if 'slides' not in skip_steps:
-        print("\n[PHASE 3] Generating Slide Content")
-        print("-" * 70)
+        logger.info("[PHASE 3] Generating slide content")
         try:
             slides_result = generate_slides(
                 seller_company_name=seller_company,
@@ -191,19 +194,18 @@ def run_full_pipeline(
                 "status": slides_result.get("status"),
                 "output_file": slides_result.get("output_file"),
             }
-            print(f"[OK] Slide content generation completed")
+            logger.info("Slide content generation completed")
         except Exception as e:
-            print(f"[ERROR] Slide content generation failed: {e}")
+            logger.exception("Slide content generation failed: %s", e)
             results["steps"]["generate_slides"] = {"status": "failed", "error": str(e)}
             results["errors"].append(f"Slide generation: {e}")
             return results
     else:
-        print("\n[PHASE 3] Skipped: Generating Slide Content")
+        logger.info("[PHASE 3] Skipped: generating slide content")
     
     # Step 4: Create PowerPoint Presentation
     if 'presentation' not in skip_steps:
-        print("\n[PHASE 4] Creating PowerPoint Presentation")
-        print("-" * 70)
+        logger.info("[PHASE 4] Creating PowerPoint presentation")
         try:
             ppt_result = generate_presentation(prospect_company=prospect_company)
             
@@ -211,61 +213,51 @@ def run_full_pipeline(
                 "status": "success",
                 "output_file": ppt_result,
             }
-            print(f"[OK] PowerPoint presentation created")
+            logger.info("PowerPoint presentation created")
         except Exception as e:
-            print(f"[ERROR] PowerPoint creation failed: {e}")
+            logger.exception("PowerPoint creation failed: %s", e)
             results["steps"]["create_presentation"] = {"status": "failed", "error": str(e)}
             results["errors"].append(f"Presentation creation: {e}")
             return results
     else:
-        print("\n[PHASE 4] Skipped: Creating PowerPoint Presentation")
+        logger.info("[PHASE 4] Skipped: creating PowerPoint presentation")
     
     # Final summary
-    print("\n" + "=" * 70)
-    print(" " * 25 + "PIPELINE COMPLETED")
-    print("=" * 70)
-    
-    print("\nGenerated Files:")
-    print("-" * 70)
+    logger.info("PIPELINE COMPLETED")
+    logger.info("Generated files:")
     
     for step_name, step_result in results["steps"].items():
         if step_result.get("status") == "success" and step_result.get("output_file"):
-            print(f"  ✓ {step_name:25} → {step_result['output_file']}")
+            logger.info("SUCCESS %-25s -> %s", step_name, step_result["output_file"])
         elif step_result.get("status") == "failed":
-            print(f"  ✗ {step_name:25} → FAILED: {step_result.get('error', 'Unknown error')}")
+            logger.error("FAILED %-25s -> %s", step_name, step_result.get("error", "Unknown error"))
     
     if results["errors"]:
-        print("\nErrors Encountered:")
-        print("-" * 70)
+        logger.error("Errors encountered:")
         for error in results["errors"]:
-            print(f"  • {error}")
+            logger.error("- %s", error)
         results["status"] = "completed_with_errors"
     else:
         results["status"] = "success"
-    
-    print("\n" + "=" * 70)
     
     return results
 
 
 def run_pipeline_interactive():
     """Run pipeline with interactive prompts for configuration."""
-    print("=" * 70)
-    print(" " * 15 + "PPT GENERATION PIPELINE - INTERACTIVE MODE")
-    print("=" * 70)
-    
-    print("\nConfiguration:")
-    print("-" * 70)
-    
-    seller = input("Seller company name [icicilombard]: ").strip() or "icicilombard"
-    prospect = input("Prospect company name [juniper]: ").strip() or "juniper"
+    default_seller = os.getenv("DEFAULT_SELLER_COMPANY", "")
+    default_prospect = os.getenv("DEFAULT_PROSPECT_COMPANY", "")
+
+    logger.info("PPT generation pipeline - interactive mode")
+    seller = input(f"Seller company name [{default_seller}]: ").strip() or default_seller
+    prospect = input(f"Prospect company name [{default_prospect}]: ").strip() or default_prospect
     ppt_template = input("PPT template path [templates/ppt-template.pptx]: ").strip() or "templates/ppt-template.pptx"
-    
-    print("\nSkip any steps? (comma-separated: analyze,theme,slides,presentation)")
+    if not seller or not prospect:
+        raise ValueError("Seller and prospect company names are required.")
+
     skip_input = input("Skip steps [none]: ").strip()
     skip_steps = [s.strip() for s in skip_input.split(",")] if skip_input else []
-    
-    print("\n")
+
     result = run_full_pipeline(
         seller_company=seller,
         prospect_company=prospect,
@@ -280,32 +272,39 @@ if __name__ == "__main__":
     """
     Main execution
     """
-    import sys
-    
-    # Check for command line arguments
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "interactive" or sys.argv[1] == "-i":
-            # Interactive mode
-            result = run_pipeline_interactive()
-        else:
-            # Show usage
-            print("Usage:")
-            print("  python run_ppt_generation.py              # Run with defaults")
-            print("  python run_ppt_generation.py interactive  # Interactive mode")
-            sys.exit(1)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run PPT generation pipeline")
+    parser.add_argument("mode", nargs="?", default="", help="Use 'interactive' for prompts")
+    parser.add_argument("--interactive", "-i", action="store_true", help="Run in interactive mode")
+    parser.add_argument("--seller-company", default=os.getenv("DEFAULT_SELLER_COMPANY"))
+    parser.add_argument("--prospect-company", default=os.getenv("DEFAULT_PROSPECT_COMPANY"))
+    parser.add_argument("--ppt-template", default="templates/ppt-template.pptx")
+    parser.add_argument(
+        "--skip-steps",
+        default="",
+        help="Comma-separated list: analyze,theme,slides,presentation",
+    )
+    args = parser.parse_args()
+
+    if args.interactive or args.mode == "interactive":
+        result = run_pipeline_interactive()
     else:
-        # Run with defaults
-        print("Running PPT generation pipeline with default settings...")
-        print("For interactive mode, run: python run_ppt_generation.py interactive\n")
-        
+        if not args.seller_company or not args.prospect_company:
+            raise ValueError(
+                "Missing seller/prospect company. Provide --seller-company and "
+                "--prospect-company or set DEFAULT_SELLER_COMPANY and "
+                "DEFAULT_PROSPECT_COMPANY."
+            )
+
         result = run_full_pipeline(
-            seller_company="icicilombard",
-            prospect_company="juniper",
+            seller_company=args.seller_company,
+            prospect_company=args.prospect_company,
+            ppt_template=args.ppt_template,
+            skip_steps=[s.strip() for s in args.skip_steps.split(",") if s.strip()],
         )
     
-    # Output result summary
-    print("\nFinal Result:")
-    print(json.dumps({
+    logger.info("Final result:\n%s", json.dumps({
         "status": result["status"],
         "seller": result["seller_company"],
         "prospect": result["prospect_company"],

@@ -1,8 +1,15 @@
 import zipfile
 import xml.etree.ElementTree as ET
 import json
+import logging
 import os
 import re
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 os.makedirs("outputs/ppt_analysis", exist_ok=True)
 
@@ -317,7 +324,7 @@ def extract_design_system(pptx_path):
     return system
 
 if __name__ == "__main__":
-    pptx_file = "templates/ppt-template.pptx"  # your PPT file
+    pptx_file = os.getenv("PPT_TEMPLATE_PATH", "templates/ppt-template.pptx")
     output_file = f"outputs/ppt_analysis/ppt_analysis_{pptx_file.split('/')[-1].split('.')[0]}.json"  # output file
 
     analysis = extract_design_system(pptx_file)
@@ -326,6 +333,5 @@ if __name__ == "__main__":
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(analysis, f, indent=2, sort_keys=True)
 
-    # print(f"Detailed PPT analysis saved to {output_file}")
-    # print(f"Total slides analyzed: {analysis['metadata']['totalSlides']}")
-    # print(f"Design system - Colors: {len(analysis['designSystem']['colors'])}, Fonts: {len(analysis['designSystem']['fonts'])}")
+    logger.info("Detailed PPT analysis saved to %s", output_file)
+    logger.info("Total slides analyzed: %s", analysis["metadata"]["totalSlides"])

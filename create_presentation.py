@@ -9,6 +9,7 @@ any single JSON output.
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -37,7 +38,7 @@ MARGIN_L     = Inches(0.5)
 CONTENT_W    = Inches(9.0)
 FOOTER_TOP   = Inches(7.12)
 FOOTER_H     = Inches(0.25)
-FOOTER_TEXT  = "InsightSphere"
+FOOTER_TEXT  = "Generated Presentation"
 
 HEADER_IMAGE = Path("templates") / "header.png"
 
@@ -75,7 +76,7 @@ class DesignSystem:
       text_color_on_light, text_color_on_dark,
       font_title, font_body, font_size_title_pt, font_size_body_pt
     """
-    theme_name:     str   = "InsightSphere"
+    theme_name:     str   = "Default Theme"
     primary_color:  str   = FB_PRIMARY
     accent_color:   str   = FB_ACCENT
     bg_color:       str   = FB_BG
@@ -791,4 +792,7 @@ def generate_presentation(
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    generate_presentation(prospect_company="juniper")
+    default_prospect = os.getenv("DEFAULT_PROSPECT_COMPANY")
+    if not default_prospect:
+        raise ValueError("Set DEFAULT_PROSPECT_COMPANY or call generate_presentation(...) directly.")
+    generate_presentation(prospect_company=default_prospect)

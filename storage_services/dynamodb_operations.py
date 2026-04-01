@@ -1,6 +1,9 @@
 from core.config import dynamodb
 from boto3.dynamodb.conditions import Key, Attr
 from core.config import DYNAMODB_SIMULATIONS_TABLE
+import logging
+
+logger = logging.getLogger(__name__)
 
 def insert_data(table_name: str, data: dict) -> None:
     """Insert data into DynamoDB."""
@@ -9,10 +12,10 @@ def insert_data(table_name: str, data: dict) -> None:
 
         # Simply put the item - DynamoDB will overwrite if it exists
         table.put_item(Item=data)
-        print(f"Successfully inserted/updated data in DynamoDB table {table_name}")
+        logger.info("Successfully inserted/updated data in DynamoDB table %s", table_name)
 
     except Exception as e:
-        print(f"Error inserting data into DynamoDB: {e}")
+        logger.exception("Error inserting data into DynamoDB: %s", e)
         raise
 
 def get_company(table_name: str, company_name: str, entity_key: str):
@@ -23,7 +26,7 @@ def get_company(table_name: str, company_name: str, entity_key: str):
         return response.get('Item', None)
 
     except Exception as e:
-        print(f"Error retrieving from DynamoDB: {e}")
+        logger.exception("Error retrieving from DynamoDB: %s", e)
         return None
 
 def get_all_companies(
@@ -74,7 +77,7 @@ def get_all_companies(
                 break
         return items
     except Exception as e:
-        print(f"Error retrieving all companies from DynamoDB: {e}")
+        logger.exception("Error retrieving all companies from DynamoDB: %s", e)
         return []
 
 def get_all_companies_paginated(
@@ -118,7 +121,7 @@ def get_all_companies_paginated(
         response = table.scan(**scan_kwargs)
         return response.get("Items", []), response.get("LastEvaluatedKey")
     except Exception as e:
-        print(f"Error retrieving paginated companies from DynamoDB: {e}")
+        logger.exception("Error retrieving paginated companies from DynamoDB: %s", e)
         return [], None
 
 def get_company_access(table_name: str, user_id: str, company_name: str) -> dict | None:
@@ -128,7 +131,7 @@ def get_company_access(table_name: str, user_id: str, company_name: str) -> dict
         response = table.get_item(Key={"user_id": user_id, "company_name": company_name})
         return response.get("Item", None)
     except Exception as e:
-        print(f"Error retrieving from companies_access: {e}")
+        logger.exception("Error retrieving from companies_access: %s", e)
         return None
 
 
@@ -153,7 +156,7 @@ def get_companies_by_user(
         response = table.query(**kwargs)
         return response.get("Items", []), response.get("LastEvaluatedKey")
     except Exception as e:
-        print(f"Error querying companies_access by user: {e}")
+        logger.exception("Error querying companies_access by user: %s", e)
         return [], None
 
 
@@ -184,7 +187,7 @@ def batch_get_companies(table_name: str, keys: list[dict]) -> list[dict]:
                 unprocessed = response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", [])
         return items
     except Exception as e:
-        print(f"Error batch getting companies: {e}")
+        logger.exception("Error batch getting companies: %s", e)
         return []
 
 
@@ -213,10 +216,10 @@ def update_data(key_value: dict, update_data: dict, table_name: str) -> None:
             ExpressionAttributeValues=expression_attribute_values,
         )
 
-        print(f"Updated successfully.")
+        logger.info("Updated successfully")
 
     except Exception as e:
-        print(f"Error updating data in DynamoDB: {e}")
+        logger.exception("Error updating data in DynamoDB: %s", e)
         raise
 
 def get_simulation_data(table_name: str, simulation_id: str, record_type: str):
@@ -225,7 +228,7 @@ def get_simulation_data(table_name: str, simulation_id: str, record_type: str):
         response = table.get_item(Key={"simulation_id": simulation_id, "record_type": record_type})
         return response.get('Item', None)
     except Exception as e:
-        print(f"Error retrieving simulation from DynamoDB: {e}")
+        logger.exception("Error retrieving simulation from DynamoDB: %s", e)
         return None
 
 
@@ -258,7 +261,7 @@ def get_simulation_by_id(table_name: str, simulation_id: str) -> dict:
         out["judge_feedbacks"].sort(key=lambda x: x["after_turn_id"])
         return out
     except Exception as e:
-        print(f"Error retrieving simulation by id from DynamoDB: {e}")
+        logger.exception("Error retrieving simulation by id from DynamoDB: %s", e)
         return {"simulation_id": simulation_id, "metadata": None, "state": None, "turns": [], "judge_feedbacks": [], "error": str(e)}
 
 
@@ -303,7 +306,7 @@ def get_all_simulations(
                 break
         return items
     except Exception as e:
-        print(f"Error retrieving all simulations from DynamoDB: {e}")
+        logger.exception("Error retrieving all simulations from DynamoDB: %s", e)
         return []
 
 def get_all_simulations_paginated(
@@ -363,8 +366,8 @@ def get_all_simulations_paginated(
         return collected, last_evaluated_key
 
     except Exception as e:
-        print(f"Error retrieving paginated simulations from DynamoDB: {e}")
+        logger.exception("Error retrieving paginated simulations from DynamoDB: %s", e)
         return [], None
 
 if __name__ == "__main__":
-    print(get_all_simulations(DYNAMODB_SIMULATIONS_TABLE, "metadata"))
+    logger.info("%s", get_all_simulations(DYNAMODB_SIMULATIONS_TABLE, "metadata"))

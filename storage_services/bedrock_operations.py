@@ -1,6 +1,9 @@
 import json
+import logging
 from core.config import bedrock_agent
 from typing import Optional, Generator
+
+logger = logging.getLogger(__name__)
 
 
 def invoke_model_with_response_stream(
@@ -45,7 +48,7 @@ def invoke_model_with_response_stream(
                 if "text" in delta:
                     yield delta["text"]
     except Exception as e:
-        print(f"Error invoking Bedrock model with response stream: {e}")
+        logger.exception("Error invoking Bedrock model with response stream: %s", e)
         raise
 
 
@@ -89,7 +92,7 @@ def invoke_model_stream(
                 if "text" in delta:
                     yield delta["text"]
     except Exception as e:
-        print(f"Error invoking Bedrock model stream: {e}")
+        logger.exception("Error invoking Bedrock model stream: %s", e)
         raise
 
 
@@ -139,7 +142,7 @@ def invoke_model(
         response = bedrock_agent.converse(**kwargs)
         return response
     except Exception as e:
-        print(f"Error invoking Bedrock model: {e}")
+        logger.exception("Error invoking Bedrock model: %s", e)
         raise
 
 
@@ -161,7 +164,7 @@ def extract_content_from_response(response: dict) -> Optional[str]:
                     return content["text"]
         return None
     except Exception as e:
-        print(f"Error extracting content from response: {e}")
+        logger.exception("Error extracting content from response: %s", e)
         return None
 
 
@@ -213,5 +216,5 @@ def invoke_agent(
         )
         return response
     except Exception as e:
-        print(f"Error invoking Bedrock agent: {e}")
+        logger.exception("Error invoking Bedrock agent: %s", e)
         raise

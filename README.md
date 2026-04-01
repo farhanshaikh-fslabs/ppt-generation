@@ -49,6 +49,9 @@ AWS_ACCESS_KEY_ID=your_access_key
 AWS_SECRET_ACCESS_KEY=your_secret_key
 BEDROCK_MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0
 DYNAMODB_COMPANIES_TABLE=companies
+DEFAULT_SELLER_COMPANY=your-seller-company
+DEFAULT_PROSPECT_COMPANY=your-prospect-company
+LOG_LEVEL=INFO
 ```
 
 ## 📋 Usage
@@ -56,14 +59,17 @@ DYNAMODB_COMPANIES_TABLE=companies
 ### Option 1: Run Complete Pipeline (Recommended)
 
 ```bash
-# Automated mode (uses defaults: seller=icicilombard, prospect=juniper)
+# Automated mode (uses DEFAULT_SELLER_COMPANY and DEFAULT_PROSPECT_COMPANY)
 python run_ppt_generation.py
 
 # Interactive mode (prompts for configuration)
 python run_ppt_generation.py interactive
+
+# Non-interactive explicit mode (overrides env defaults)
+python run_ppt_generation.py --seller-company acme --prospect-company globex
 ```
 
-**Output:** `outputs/presentations/presentation_juniper.pptx`
+**Output:** `outputs/presentations/presentation_<prospect>_<timestamp>.pptx`
 
 ### Option 2: Run Individual Steps
 
@@ -78,11 +84,11 @@ python suggest_ppt_theme.py
 
 # Step 3: Generate slide content
 python generate_slide_content.py
-# Output: outputs/generated_slides/slides_juniper.json
+# Output: outputs/generated_slides/slides_<prospect>.json
 
 # Step 4: Create PowerPoint
 python create_presentation.py
-# Output: outputs/presentations/presentation_juniper.pptx
+# Output: outputs/presentations/presentation_<prospect>_<timestamp>.pptx
 ```
 
 ### Option 3: Programmatic Usage
@@ -92,15 +98,15 @@ from run_ppt_generation import run_full_pipeline
 
 # Run complete pipeline
 result = run_full_pipeline(
-    seller_company="icicilombard",
-    prospect_company="juniper",
+    seller_company="your-seller-company",
+    prospect_company="your-prospect-company",
     ppt_template="templates/ppt-template.pptx"
 )
 
 # Skip certain steps
 result = run_full_pipeline(
-    seller_company="icicilombard",
-    prospect_company="juniper",
+    seller_company="your-seller-company",
+    prospect_company="your-prospect-company",
     skip_steps=['analyze', 'theme']  # Already done, skip these
 )
 
@@ -252,7 +258,7 @@ Slide Content JSON
 PowerPoint Presentation (.pptx)
 ```
 
-## 🧪 Example: Generate Presentation for Juniper Networks
+## 🧪 Example: Generate a Presentation
 
 ```bash
 # Run the complete pipeline
@@ -260,14 +266,14 @@ python run_ppt_generation.py
 
 # Or interactively
 python run_ppt_generation.py interactive
-# Then enter: seller=icicilombard, prospect=juniper
+# Then enter seller/prospect company names when prompted
 ```
 
 **Output files created:**
 - `outputs/ppt_analysis/ppt_detailed_analysis_ppt-template.json`
 - `outputs/theme_suggestions/theme_suggestion_ppt-template.md`
-- `outputs/generated_slides/slides_juniper.json`
-- `outputs/presentations/presentation_juniper.pptx` ✓ **READY TO USE**
+- `outputs/generated_slides/slides_<prospect>.json`
+- `outputs/presentations/presentation_<prospect>_<timestamp>.pptx` ✓ **READY TO USE**
 
 ## 🔧 Configuration
 
@@ -276,6 +282,8 @@ python run_ppt_generation.py interactive
 Set these for your AWS environment:
 - `BEDROCK_MODEL_ID` - Claude model to use (default: Haiku 4.5)
 - `DYNAMODB_COMPANIES_TABLE` - DynamoDB table name
+- `DEFAULT_SELLER_COMPANY` / `DEFAULT_PROSPECT_COMPANY` - pipeline runtime defaults
+- `LOG_LEVEL` - application logging level (`DEBUG`, `INFO`, `WARNING`, etc.)
 - AWS credentials (from `.env`)
 
 ### Bedrock Operations (`storage_services/bedrock_operations.py`)
@@ -335,6 +343,7 @@ Automatically maintained across all generated presentations:
 - Slide content is generated fresh for each prospect
 - Company data is fetched from DynamoDB (ensure table and records exist)
 - Claude APIs are called during steps 2 and 3 (may incur costs)
+- Scripts now use Python logging; control verbosity with `LOG_LEVEL`
 
 ## 🔐 Security
 

@@ -1,7 +1,14 @@
 import json
+import logging
 import os
 from storage_services.bedrock_operations import invoke_model, extract_content_from_response
 from core.config import BEDROCK_MODEL_ID
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # Ensure output directory exists
 os.makedirs("outputs/theme_suggestions", exist_ok=True)
@@ -42,10 +49,10 @@ def load_prompts():
             raise ValueError("Could not parse prompts from file")
     
     except FileNotFoundError:
-        print(f"[ERROR] Prompt file not found: {prompt_file}")
+        logger.error("Prompt file not found: %s", prompt_file)
         raise
     except Exception as e:
-        print(f"[ERROR] Error loading prompts: {e}")
+        logger.exception("Error loading prompts: %s", e)
         raise
 
 
@@ -65,13 +72,13 @@ def load_ppt_analysis(analysis_file: str) -> dict:
     try:
         with open(analysis_file, 'r', encoding='utf-8') as f:
             analysis = json.load(f)
-        print(f"[OK] Loaded PPT analysis from {analysis_file}")
+        logger.info("Loaded PPT analysis from %s", analysis_file)
         return analysis
     except FileNotFoundError:
-        print(f"[ERROR] PPT analysis file not found: {analysis_file}")
+        logger.error("PPT analysis file not found: %s", analysis_file)
         raise
     except json.JSONDecodeError:
-        print(f"[ERROR] Failed to parse JSON from {analysis_file}")
+        logger.error("Failed to parse JSON from %s", analysis_file)
         raise
 
 
@@ -103,7 +110,7 @@ def generate_theme_suggestion(
         {"role": "user", "content": [{"text": user_prompt}]}
     ]
     
-    print(f"Invoking {model_id} to generate theme suggestions...")
+    logger.info("Invoking model %s to generate theme suggestions", model_id)
     
     try:
         # Invoke the model
@@ -119,13 +126,13 @@ def generate_theme_suggestion(
         theme_suggestion = extract_content_from_response(response)
         
         if theme_suggestion:
-            print("[OK] Theme suggestion generated successfully")
+            logger.info("Theme suggestion generated successfully")
             return theme_suggestion
         else:
-            print("[ERROR] Failed to extract content from model response")
+            logger.error("Failed to extract content from model response")
             return None
     except Exception as e:
-        print(f"[ERROR] Error generating theme suggestion: {e}")
+        logger.exception("Error generating theme suggestion: %s", e)
         raise
 
 
@@ -148,10 +155,10 @@ def save_theme_suggestion(
             f.write(theme_suggestion)
         
         file_format = "Markdown" if output_file.endswith('.md') else "JSON"
-        print(f"[OK] Theme suggestion saved as {file_format} to {output_file}")
+        logger.info("Theme suggestion saved as %s to %s", file_format, output_file)
         return output_file
     except Exception as e:
-        print(f"[ERROR] Error saving theme suggestion: {e}")
+        logger.exception("Error saving theme suggestion: %s", e)
         raise
 
 
@@ -182,9 +189,7 @@ def create_theme_guide(
         ppt_name = ppt_file.split('/')[-1].split('.')[0]
         output_file = f"outputs/theme_suggestions/theme_suggestion_{ppt_name}.md"
     
-    print("=" * 60)
-    print("PPT Theme Suggestion Generator")
-    print("=" * 60)
+    logger.info("PPT Theme Suggestion Generator")
     
     # Load PPT analysis
     ppt_analysis = load_ppt_analysis(analysis_file)
@@ -206,12 +211,12 @@ def create_theme_guide(
         "theme_suggestion_preview": theme_suggestion[:500] + "..." if len(theme_suggestion) > 500 else theme_suggestion,
     }
     
-    print("=" * 60)
-    print("Summary:")
-    print(f"  Input PPT: {ppt_file}")
-    print(f"  Analysis: {analysis_file}")
-    print(f"  Theme Suggestion: {saved_file}")
-    print("=" * 60)
+    logger.info(
+        "Summary: input_ppt=%s analysis=%s theme_suggestion=%s",
+        ppt_file,
+        analysis_file,
+        saved_file,
+    )
     
     return result
 
@@ -219,4 +224,4 @@ def create_theme_guide(
 if __name__ == "__main__":
     # Example usage
     result = create_theme_guide()
-    print("\nResult:", json.dumps(result, indent=2, default=str))
+    logger.info("Result:\n%s", json.dumps(result, indent=2, default=str))
