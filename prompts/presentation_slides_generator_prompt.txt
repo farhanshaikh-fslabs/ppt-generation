@@ -19,7 +19,7 @@ programmatically and used to render a PowerPoint file.
    slide matters specifically to the prospect (this field is for QA — it will not
    be rendered on the slide).
 6. Bullet text must be ≤ 12 words per bullet. No full sentences. No paragraphs.
-7. Total slides: minimum 5, maximum 10. Choose the count that serves the narrative —
+7. Total slides: minimum 9, maximum 12. Choose the count that serves the narrative —
    do not pad.
 8. Do not use placeholder text. Every field must contain real, tailored content
    derived from the inputs.
@@ -61,8 +61,8 @@ Each slide must advance one stage of the arc. Do not repeat a stage.
 
 ### SLIDE SEQUENCE GUIDE
 
-Use the following slide types in order. You may omit optional slides or add one
-additional slide if the narrative requires it.
+Use the following slide types in order. You may add up to 2 additional slides
+if the narrative requires it. Target 9–12 slides total.
 
 | # | Slide Type      | Required? | Purpose |
 |---|-----------------|-----------|---------|
@@ -70,12 +70,14 @@ additional slide if the narrative requires it.
 | 2 | content         | ✅        | EMPATHY — about the seller (brief, credibility only) |
 | 3 | content         | ✅        | EMPATHY — prospect's world: industry, goals, context |
 | 4 | two_column      | ✅        | EMPATHY — prospect's top challenges (left) + opportunities (right) |
-| 5 | content/chart   | Optional  | PROOF — market data or industry benchmark relevant to prospect |
+| 5 | content/chart   | ✅        | PROOF — market data or industry benchmark relevant to prospect |
 | 6 | content         | ✅        | SOLUTION — seller services mapped to prospect's challenge #1 |
-| 7 | two_column      | Optional  | SOLUTION — seller services mapped to challenge #2 or comparison |
-| 8 | centered_content| ✅        | PROOF — value proposition / why seller, not a competitor |
-| 9 | content         | ✅        | PATH — proposed approach, timeline, or next steps |
-|10 | closing         | ✅        | PATH — CTA, contact, leave-behind |
+| 7 | content         | ✅        | SOLUTION — seller services mapped to prospect's challenge #2 |
+| 8 | two_column      | Optional  | SOLUTION — comparison or additional service mapping |
+| 9 | centered_content| ✅        | PROOF — value proposition / why seller, not a competitor |
+|10 | content         | ✅        | PATH — proposed approach, timeline, or next steps |
+|11 | content         | Optional  | PATH — implementation roadmap or case study |
+|12 | closing         | ✅        | PATH — CTA, contact, leave-behind |
 
 ---
 
@@ -212,7 +214,7 @@ Each slide object must include these base fields, plus type-specific fields belo
   "title": "string",
   "subtitle": "string — data source or context",
   "chart": {
-    "chart_type": "bar | line | pie | donut | scatter",
+    "chart_type": "bar",
     "title": "string",
     "description": "string — what the chart proves",
     "x_axis_label": "string",
@@ -321,7 +323,7 @@ Before finalizing your JSON, verify:
 - [ ] Every content slide has prospect_relevance_note filled (not generic)
 - [ ] The narrative arc (HOOK → EMPATHY → SOLUTION → PROOF → PATH) is traceable
 - [ ] The closing slide has a specific, actionable CTA (not "Let's connect")
-- [ ] Total slides is between 5 and 10
+- [ ] Total slides is between 9 and 12
 
 ---
 

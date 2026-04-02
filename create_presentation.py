@@ -38,12 +38,12 @@ MARGIN_L     = Inches(0.5)
 CONTENT_W    = Inches(9.0)
 FOOTER_TOP   = Inches(7.12)
 FOOTER_H     = Inches(0.25)
-FOOTER_TEXT  = "Generated Presentation"
+FOOTER_TEXT  = "InsightSphere"
 
 HEADER_IMAGE = Path("templates") / "header.png"
 
 # Content-slide title hard cap (user requirement: <=28 pt or title overflows)
-CONTENT_TITLE_PT = 28
+CONTENT_TITLE_PT = 24
 
 # Chart-type mapping from JSON schema string → python-pptx enum
 CHART_TYPE_MAP = {
@@ -348,7 +348,7 @@ def _slide_title(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
         try:
             slide.shapes.add_picture(
                 str(HEADER_IMAGE),
-                Inches(7.5), Inches(0.15),
+                Inches(0.3), Inches(0.25),
                 width=Inches(2.2), height=Inches(0.36),
             )
         except Exception as e:
@@ -420,14 +420,14 @@ def _slide_two_column(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
         header = col.get("header", "")
         items  = col.get("items", [])
 
-        _, _, hp = _textbox(slide, col_left, col_top, col_w, Inches(0.45))
+        _, _, hp = _textbox(slide, col_left, col_top, col_w, Inches(1.45))
         _fmt(hp, header, 18, bold=True, color=hdr_color, font_name=ds.font_title)
 
-        _accent_line(slide, top=col_top + Inches(0.49),
+        _accent_line(slide, top=col_top + Inches(0.69),
                      left=col_left, width=col_w, color=hdr_color)
 
         _render_str_list(slide, items, ds.text_on_light,
-                         left=col_left, top=col_top + Inches(0.62),
+                         left=col_left, top=col_top + Inches(1.0),
                          width=col_w, height=Inches(5.0), pt=14,
                          font_name=ds.font_body)
 
@@ -568,23 +568,34 @@ def _slide_centered(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
     accent_els = sd.get("accent_elements", {})
     line_color = accent_els.get("line_color", ds.accent_color)
 
+    points   = sd.get("supporting_points", [])
+    subtitle = sd.get("subtitle", "")
+
+    # Adaptive vertical placement: shift everything up when there are
+    # supporting points so the slide doesn't look top-heavy / empty.
+    has_points = bool(points)
+    line_before_top = Inches(0.6)  if has_points else Inches(1.95)
+    title_top       = Inches(0.75) if has_points else Inches(2.15)
+    subtitle_top    = Inches(2.65) if has_points else Inches(3.75)
+    points_top      = Inches(3.35) if has_points else Inches(4.55)
+    line_after_top  = Inches(6.45)
+
     if accent_els.get("lines_before") in (True, "true"):
-        _accent_line(slide, top=Inches(1.95),
+        _accent_line(slide, top=line_before_top,
                      left=Inches(1.2), width=Inches(7.6), color=line_color)
 
-    _, _, p = _textbox(slide, Inches(0.8), Inches(2.15), Inches(8.4), Inches(1.5))
+    _, _, p = _textbox(slide, Inches(0.8), title_top, Inches(8.4), Inches(1.0))
     _fmt(p, sd.get("title", ""), ds.title_pt,
          bold=True, color=text_color, align=PP_ALIGN.CENTER, font_name=ds.font_title)
 
-    subtitle = sd.get("subtitle", "")
     if subtitle:
-        _, _, p = _textbox(slide, Inches(0.8), Inches(3.75), Inches(8.4), Inches(0.7))
+        _, _, p = _textbox(slide, Inches(0.8), subtitle_top, Inches(8.4), Inches(0.6))
         _fmt(p, subtitle, 18, color=text_color, align=PP_ALIGN.CENTER,
              font_name=ds.font_body)
 
-    points = sd.get("supporting_points", [])
     if points:
-        _, tf, _ = _textbox(slide, Inches(1.5), Inches(4.55), Inches(7), Inches(1.8))
+        points_h = line_after_top - points_top - Inches(0.15)
+        _, tf, _ = _textbox(slide, Inches(1.2), points_top, Inches(7.6), points_h)
         tf.word_wrap = True
         for i, pt_text in enumerate(points):
             para = tf.paragraphs[i] if i == 0 else tf.add_paragraph()
@@ -593,10 +604,11 @@ def _slide_centered(prs: Presentation, sd: dict, ds: DesignSystem) -> None:
             para.font.name      = ds.font_body
             para.font.color.rgb = _rgb(text_color)
             para.alignment      = PP_ALIGN.CENTER
-            para.space_before   = Pt(4)
+            para.space_before   = Pt(6)
+            para.space_after    = Pt(6)
 
     if accent_els.get("lines_after") in (True, "true"):
-        _accent_line(slide, top=Inches(6.45),
+        _accent_line(slide, top=line_after_top,
                      left=Inches(1.2), width=Inches(7.6), color=line_color)
 
 
@@ -792,7 +804,7 @@ def generate_presentation(
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    default_prospect = os.getenv("DEFAULT_PROSPECT_COMPANY")
+    default_prospect = os.getenv("DEFAULT_PROSPECT_COMPANY", "ey")
     if not default_prospect:
         raise ValueError("Set DEFAULT_PROSPECT_COMPANY or call generate_presentation(...) directly.")
     generate_presentation(prospect_company=default_prospect)
